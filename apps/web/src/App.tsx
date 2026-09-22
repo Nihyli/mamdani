@@ -7,8 +7,14 @@ import { FixedPage } from "./pages/FixedPage";
 import { SubmitPage } from "./pages/SubmitPage";
 import { MyReportsPage } from "./pages/MyReportsPage";
 import { SignInPage } from "./pages/SignInPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import { AdminPage } from "./pages/AdminPage";
 import { AboutPage, PrivacyPage, TermsPage } from "./pages/LegalPages";
+import {
+  CopyrightPage,
+  GuidelinesPage,
+  ReportContentPage,
+} from "./pages/TrustPages";
 import { brand } from "./lib/brand";
 import { useEffect } from "react";
 
@@ -30,9 +36,13 @@ export default function App() {
             <Route path="my-reports/:submissionId" element={<MyReportsPage />} />
             <Route path="admin" element={<AdminPage />} />
             <Route path="sign-in" element={<SignInPage />} />
+            <Route path="settings" element={<SettingsPage />} />
             <Route path="about" element={<AboutPage />} />
             <Route path="terms" element={<TermsPage />} />
             <Route path="privacy" element={<PrivacyPage />} />
+            <Route path="guidelines" element={<GuidelinesPage />} />
+            <Route path="report-content" element={<ReportContentPage />} />
+            <Route path="copyright" element={<CopyrightPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
