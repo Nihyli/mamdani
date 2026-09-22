@@ -9,13 +9,15 @@ import {
   submissionKindSchema,
   updateKindSchema,
 } from "./enums.js";
-
+import {
+  analysisProposalSchema,
+  duplicateCandidateSchema,
+} from "./proposal.js";
 const uuid = z.string().uuid();
 const isoDateTime = z.string().datetime({ offset: true });
 
 /**
- * Public API shapes for M1 endpoints in SPEC §10.
- * Snapshot/tiles/manifest hardening endpoints are omitted until projections land.
+ * Public API shapes for M1–M3 endpoints in SPEC §10 / §17 / §26.
  */
 
 // --- Public issue detail (GET /api/public/issues/{id}) ---------------------
@@ -372,10 +374,136 @@ export const adminQueueItemSchema = z.object({
   description: z.string().nullable().optional(),
   sourceUrl: z.string().url().nullable().optional(),
   media: z.array(adminQueueMediaSchema).default([]),
+  /** M2: structured analysis proposal shown beside the user's location. */
+  analysisProposal: analysisProposalSchema.nullable().optional(),
+  /** M2: published issues within ~50 m of the user pin. */
+  duplicateCandidates: z.array(duplicateCandidateSchema).default([]),
+  /** M2: explicit-clue geocode candidates (private until reviewed). */
+  locationCandidates: z
+    .array(
+      z.object({
+        id: uuid,
+        location: geoPointSchema,
+        precision: locationPrecisionSchema,
+        provider: z.string().nullable(),
+        verification: z.string().min(1),
+      }),
+    )
+    .default([]),
 });
 export type AdminQueueItem = z.infer<typeof adminQueueItemSchema>;
-
 export const adminQueueResponseSchema = z.object({
   items: z.array(adminQueueItemSchema),
 });
 export type AdminQueueResponse = z.infer<typeof adminQueueResponseSchema>;
+
+// --- M3: public snapshots / manifest (SPEC §10–11) ------------------------
+
+export const publicSnapshotFeatureSchema = z.object({
+  id: uuid,
+  shortId: z.string().min(1),
+  slug: z.string().min(1),
+  path: z.string().min(1),
+  category: issueCategorySchema,
+  status: z.enum(["open", "fix_pending", "resolved"]),
+  borough: nycBoroughSchema,
+  longitude: z.number(),
+  latitude: z.number(),
+  title: z.string().min(1),
+  supportCount: z.number().int().nonnegative(),
+  revision: z.number().int().positive(),
+  createdAt: isoDateTime.optional(),
+  resolvedAt: isoDateTime.nullable().optional(),
+});
+export type PublicSnapshotFeature = z.infer<typeof publicSnapshotFeatureSchema>;
+
+export const publicSnapshotSchema = z.object({
+  version: z.string().min(1),
+  borough: z.union([nycBoroughSchema, z.literal("citywide")]),
+  generatedAt: isoDateTime,
+  features: z.array(publicSnapshotFeatureSchema),
+});
+export type PublicSnapshot = z.infer<typeof publicSnapshotSchema>;
+
+export const publicManifestSchema = z.object({
+  version: z.string().min(1),
+  publishedAt: isoDateTime,
+  featureCount: z.number().int().nonnegative(),
+  boroughs: z.array(
+    z.object({
+      key: z.union([nycBoroughSchema, z.literal("citywide")]),
+      path: z.string().min(1),
+    }),
+  ),
+  updatedLabel: z.string().min(1),
+});
+export type PublicManifest = z.infer<typeof publicManifestSchema>;
+
+// --- M3: content reports /report-content (SPEC §26) -----------------------
+
+export const contentReportCategorySchema = z.enum([
+  "privacy_exposure",
+  "ncii",
+  "threat_safety",
+  "wrong_location",
+  "other",
+]);
+export type ContentReportCategory = z.infer<typeof contentReportCategorySchema>;
+
+export const createContentReportRequestSchema = z.object({
+  category: contentReportCategorySchema,
+  description: z.string().min(3).max(4000),
+  pageUrl: z.string().url().optional(),
+  issueId: uuid.optional(),
+  mediaId: uuid.optional(),
+  contactEmail: z.string().email().optional(),
+});
+export type CreateContentReportRequest = z.infer<
+  typeof createContentReportRequestSchema
+>;
+
+export const createContentReportResponseSchema = z.object({
+  caseNumber: z.string().min(1),
+  receiptToken: z.string().min(1),
+  statusPath: z.string().min(1),
+  isUrgent: z.boolean(),
+  urgentDeadlineAt: isoDateTime.nullable(),
+  accepted: z.literal(true),
+});
+export type CreateContentReportResponse = z.infer<
+  typeof createContentReportResponseSchema
+>;
+
+export const contentReportStatusResponseSchema = z.object({
+  caseNumber: z.string().min(1),
+  category: contentReportCategorySchema,
+  status: z.enum(["open", "acknowledged", "actioned", "closed"]),
+  isUrgent: z.boolean(),
+  urgentDeadlineAt: isoDateTime.nullable(),
+  createdAt: isoDateTime,
+  updatedAt: isoDateTime,
+});
+export type ContentReportStatusResponse = z.infer<
+  typeof contentReportStatusResponseSchema
+>;
+
+// --- M3: admin takedown ---------------------------------------------------
+
+export const createTakedownRequestSchema = z.object({
+  kind: z.enum(["copyright", "privacy", "safety", "admin"]),
+  issueId: uuid.optional(),
+  mediaIds: z.array(uuid).default([]),
+  contentReportId: uuid.optional(),
+  notes: z.string().max(4000).optional(),
+  /** Hide the issue from public maps when true (default for issue-scoped). */
+  hideIssue: z.boolean().default(true),
+  expectedRevision: z.number().int().positive().optional(),
+});
+export type CreateTakedownRequest = z.infer<typeof createTakedownRequestSchema>;
+
+export const createTakedownResponseSchema = z.object({
+  caseNumber: z.string().min(1),
+  status: z.enum(["open", "restricted", "purged", "closed"]),
+  issueId: uuid.nullable(),
+});
+export type CreateTakedownResponse = z.infer<typeof createTakedownResponseSchema>;
