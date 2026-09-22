@@ -8,7 +8,7 @@ import { SubmitPage } from "./pages/SubmitPage";
 import { MyReportsPage } from "./pages/MyReportsPage";
 import { SignInPage } from "./pages/SignInPage";
 import { AdminPage } from "./pages/AdminPage";
-import { PrivacyPage, TermsPage } from "./pages/LegalPages";
+import { AboutPage, PrivacyPage, TermsPage } from "./pages/LegalPages";
 import { brand } from "./lib/brand";
 import { useEffect } from "react";
 
@@ -30,6 +30,7 @@ export default function App() {
             <Route path="my-reports/:submissionId" element={<MyReportsPage />} />
             <Route path="admin" element={<AdminPage />} />
             <Route path="sign-in" element={<SignInPage />} />
+            <Route path="about" element={<AboutPage />} />
             <Route path="terms" element={<TermsPage />} />
             <Route path="privacy" element={<PrivacyPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />

@@ -120,6 +120,49 @@ export function createApp(deps: {
 
   app.get("/health", (c) => c.json({ ok: true }));
 
+  // Crawler/OG HTML for /r/{slug}-{shortId}; social bots do not run the React SPA.
+  app.get("/r/:slug", async (c) => {
+    const sql = requireSql(deps.sql);
+    const slugParam = c.req.param("slug");
+    const rows = await sql<ShareIssueRow[]>`
+      SELECT i.title, i.status, i.borough, i.slug, i.short_id
+      FROM public.issues i
+      WHERE (i.slug || '-' || i.short_id) = ${slugParam}
+        AND i.status IN ('open', 'fix_pending', 'resolved')
+      LIMIT 1
+    `;
+    const issue = rows[0];
+    const reportPath = `/r/${slugParam}`;
+    const appUrl = `${config.publicAppUrl}${reportPath}`;
+
+    if (!issue) {
+      const html = shareHtmlDocument({
+        title: "Report not found",
+        description: config.disclaimer,
+        url: appUrl,
+        brandName: config.brandName,
+        bodyLink: appUrl,
+        bodyText: "This report was not found.",
+      });
+      c.header("Cache-Control", "public, max-age=30");
+      return c.html(html, 404);
+    }
+
+    const statusLabel = SHARE_STATUS_LABELS[issue.status] ?? issue.status;
+    const boroughLabel = SHARE_BOROUGH_LABELS[issue.borough] ?? issue.borough;
+    const description = `${statusLabel}. ${boroughLabel}. ${config.disclaimer}`;
+    const html = shareHtmlDocument({
+      title: issue.title,
+      description,
+      url: appUrl,
+      brandName: config.brandName,
+      bodyLink: appUrl,
+      bodyText: "Open this report on the map.",
+    });
+    c.header("Cache-Control", "public, max-age=30");
+    return c.html(html, 200);
+  });
+
   app.put("/dev-uploads/*", async (c) => {
     const objectKey = c.req.path.replace(/^\/dev-uploads\//, "");
     try {
@@ -1353,6 +1396,69 @@ type QueueMediaRow = {
   mime_type: string;
   private_object_key: string;
 };
+
+type ShareIssueRow = {
+  title: string;
+  status: string;
+  borough: string;
+  slug: string;
+  short_id: string;
+};
+
+const SHARE_STATUS_LABELS: Record<string, string> = {
+  open: "Open",
+  fix_pending: "Possibly fixed",
+  resolved: "Verified fixed",
+};
+
+const SHARE_BOROUGH_LABELS: Record<string, string> = {
+  manhattan: "Manhattan",
+  brooklyn: "Brooklyn",
+  queens: "Queens",
+  bronx: "Bronx",
+  staten_island: "Staten Island",
+};
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function shareHtmlDocument(opts: {
+  title: string;
+  description: string;
+  url: string;
+  brandName: string;
+  bodyLink: string;
+  bodyText: string;
+}): string {
+  const title = escapeHtml(opts.title);
+  const description = escapeHtml(opts.description);
+  const url = escapeHtml(opts.url);
+  const brandName = escapeHtml(opts.brandName);
+  const bodyLink = escapeHtml(opts.bodyLink);
+  const bodyText = escapeHtml(opts.bodyText);
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>${title} · ${brandName}</title>
+<meta name="description" content="${description}"/>
+<meta property="og:title" content="${title}"/>
+<meta property="og:description" content="${description}"/>
+<meta property="og:url" content="${url}"/>
+<meta http-equiv="refresh" content="0;url=${bodyLink}"/>
+<link rel="canonical" href="${bodyLink}"/>
+</head>
+<body>
+<p><a href="${bodyLink}">${bodyText}</a></p>
+</body>
+</html>`;
+}
 
 function listItem(row: IssueListRow) {
   const days =

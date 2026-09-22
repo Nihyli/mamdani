@@ -46,10 +46,28 @@ export const FALLBACK_BRAND: BrandConfig = {
 };
 
 /**
- * Active brand for this build. Flip to FALLBACK_BRAND (or drive from env in the
- * API/web apps) when counsel writes a no-go on the primary name.
+ * Active brand for this build. Prefer resolveBrand() from BRAND / VITE_BRAND
+ * (primary|fallback) in apps; this constant remains the compile-time default.
  */
 export const ACTIVE_BRAND: BrandConfig = PRIMARY_BRAND;
+
+/** Env / Vite values that select PRIMARY_BRAND vs FALLBACK_BRAND. */
+export type BrandSelection = "primary" | "fallback";
+
+/**
+ * Pick PRIMARY or FALLBACK from an env-style value (`primary` | `fallback`).
+ * Default: primary. Unknown values fall back to primary.
+ */
+export function resolveBrand(
+  selection: string | null | undefined = "primary",
+): BrandConfig {
+  const key = (selection ?? "primary").trim().toLowerCase();
+  return key === "fallback" ? FALLBACK_BRAND : PRIMARY_BRAND;
+}
+
+export function brandSelectionOf(brand: BrandConfig): BrandSelection {
+  return brand.name === FALLBACK_BRAND.name ? "fallback" : "primary";
+}
 
 /** Persistent unofficial disclaimer (SPEC §3). */
 export const UNOFFICIAL_DISCLAIMER =

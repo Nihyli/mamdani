@@ -12,16 +12,37 @@ import {
   uploadBytesWithProgress,
 } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { brand } from "../lib/brand";
+import { brand, disclaimer } from "../lib/brand";
 import {
   BOROUGH_LABELS,
   CATEGORY_LABELS,
+  STATUS_LABELS,
   daysToVerifiedFixLabel,
   formatAge,
   isPublicMapStatus,
 } from "../lib/labels";
 import { ErrorState, LoadingState, Page } from "../components/Layout";
 import { StatusBadge } from "../components/StatusBadge";
+
+function setMetaProperty(property: string, content: string) {
+  let el = document.querySelector(`meta[property="${property}"]`);
+  if (!el) {
+    el = document.createElement("meta");
+    el.setAttribute("property", property);
+    document.head.appendChild(el);
+  }
+  el.setAttribute("content", content);
+}
+
+function setMetaName(name: string, content: string) {
+  let el = document.querySelector(`meta[name="${name}"]`);
+  if (!el) {
+    el = document.createElement("meta");
+    el.setAttribute("name", name);
+    document.head.appendChild(el);
+  }
+  el.setAttribute("content", content);
+}
 
 const ALLOWED = new Set(["image/jpeg", "image/png", "image/webp", "video/mp4"]);
 const MAX_PHOTO = 10 * 1024 * 1024;
@@ -79,6 +100,27 @@ export function ReportPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!issue) return;
+    const status = isPublicMapStatus(issue.status) ? issue.status : "open";
+    const statusLabel = STATUS_LABELS[status];
+    const boroughLabel = BOROUGH_LABELS[issue.borough] ?? issue.borough;
+    const description = [
+      `${statusLabel}. ${boroughLabel}.`,
+      disclaimer,
+    ].join(" ");
+    const url = `${window.location.origin}${issue.path}`;
+    const prevTitle = document.title;
+    document.title = `${issue.title} · ${brand.name}`;
+    setMetaName("description", description);
+    setMetaProperty("og:title", issue.title);
+    setMetaProperty("og:description", description);
+    setMetaProperty("og:url", url);
+    return () => {
+      document.title = prevTitle || brand.name;
+    };
+  }, [issue]);
 
   async function share() {
     if (!issue) return;

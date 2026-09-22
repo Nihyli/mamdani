@@ -1,4 +1,4 @@
-import { ACTIVE_BRAND, disclaimerFor } from "@mamdani-ticketer/contracts";
+import { disclaimerFor, resolveBrand } from "@mamdani-ticketer/contracts";
 
 export type ApiConfig = {
   port: number;
@@ -6,6 +6,7 @@ export type ApiConfig = {
   dailyReviewCapacity: number;
   bbox: { minLng: number; maxLng: number; minLat: number; maxLat: number };
   publicUploadBaseUrl: string;
+  publicAppUrl: string;
   uploadDir: string;
   objectStore: "filesystem" | "mock";
   allowDevAuth: boolean;
@@ -24,6 +25,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean);
+  const brand = resolveBrand(env.BRAND);
   return {
     port: num(env.API_PORT, 8787),
     corsOrigins: origins,
@@ -37,11 +39,15 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     publicUploadBaseUrl: (
       env.PUBLIC_UPLOAD_BASE_URL ?? "http://localhost:8787/dev-uploads"
     ).replace(/\/$/, ""),
+    publicAppUrl: (env.PUBLIC_APP_URL ?? "http://localhost:5173").replace(
+      /\/$/,
+      "",
+    ),
     uploadDir: env.UPLOAD_DIR ?? ".uploads",
     objectStore: env.OBJECT_STORE === "mock" ? "mock" : "filesystem",
     allowDevAuth: env.ALLOW_DEV_AUTH === "true",
-    brandName: env.BRAND_NAME?.trim() || ACTIVE_BRAND.name,
-    disclaimer: disclaimerFor(ACTIVE_BRAND),
+    brandName: env.BRAND_NAME?.trim() || brand.name,
+    disclaimer: disclaimerFor(brand),
   };
 }
 

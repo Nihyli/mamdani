@@ -2,6 +2,33 @@ import { Link } from "react-router-dom";
 import { brand, disclaimer } from "../lib/brand";
 import { Page } from "../components/Layout";
 
+export function AboutPage() {
+  return (
+    <Page title={`About ${brand.name}`} narrow>
+      <p className="mb-4 text-ink">
+        {brand.name} is an unofficial map of public-space problems in New York
+        City, and a record of what got fixed. {brand.tagline}
+      </p>
+      <p className="mb-4 text-sm text-muted">{disclaimer}</p>
+      <ul className="mb-6 list-disc space-y-2 pl-5 text-sm text-ink">
+        <li>Publishing here does not submit a request to NYC 311.</li>
+        <li>
+          For immediate danger, call 911. This site is not monitored as an
+          emergency service.
+        </li>
+      </ul>
+      <p className="flex flex-wrap gap-x-4 gap-y-2 text-sm">
+        <Link to="/terms" className="text-cobalt underline-offset-2 hover:underline">
+          Terms
+        </Link>
+        <Link to="/privacy" className="text-cobalt underline-offset-2 hover:underline">
+          Privacy
+        </Link>
+      </p>
+    </Page>
+  );
+}
+
 export function TermsPage() {
   return (
     <Page title="Terms of Use" narrow>

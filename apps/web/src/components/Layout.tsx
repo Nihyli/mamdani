@@ -88,6 +88,9 @@ export function SiteFooter() {
       <div className="mx-auto flex max-w-6xl flex-col gap-2 md:flex-row md:items-start md:justify-between">
         <p className="max-w-xl">{disclaimer}</p>
         <div className="flex flex-wrap gap-x-4 gap-y-2">
+          <Link to="/about" className="underline-offset-2 hover:underline">
+            About
+          </Link>
           <Link to="/terms" className="underline-offset-2 hover:underline">
             Terms
           </Link>

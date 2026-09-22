@@ -1,8 +1,9 @@
 import {
-  ACTIVE_BRAND,
   disclaimerFor,
+  resolveBrand,
   type BrandConfig,
 } from "@mamdani-ticketer/contracts";
 
-export const brand: BrandConfig = ACTIVE_BRAND;
+/** VITE_BRAND=primary|fallback (default primary). Rebuild/restart Vite after flip. */
+export const brand: BrandConfig = resolveBrand(import.meta.env.VITE_BRAND);
 export const disclaimer = disclaimerFor(brand);
