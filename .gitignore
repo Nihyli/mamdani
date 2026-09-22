@@ -9,5 +9,13 @@ dist/
 .pgdata/
 .pgsocket/
 .tmp/
+workers/media/.deps/
+workers/media/.venv/
+workers/media/**/__pycache__/
+workers/media/.pytest_cache/
+__pycache__/
+.snapshots/
+.artifacts/
+.exports/
 # Large local Protomaps extracts (see apps/web/public/basemap/README.md)
 *.pmtiles
