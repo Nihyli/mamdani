@@ -842,8 +842,29 @@ export function createApp(deps: {
       ORDER BY u.created_at DESC, u.id DESC
     `;
 
+    // Senior mods also see verified-fixed issues so they can reopen (SPEC §19 M1).
+    const resolvedRows = SENIOR_ROLES.has(user.role)
+      ? await sql<QueueResolvedRow[]>`
+          SELECT
+            i.id AS issue_id,
+            i.title,
+            i.category,
+            i.borough,
+            i.revision,
+            COALESCE(i.resolved_at, i.updated_at, i.created_at) AS created_at,
+            i.description,
+            ST_X(i.geometry) AS longitude,
+            ST_Y(i.geometry) AS latitude
+          FROM public.issues i
+          WHERE i.status = 'resolved'
+          ORDER BY COALESCE(i.resolved_at, i.updated_at, i.created_at) DESC, i.id DESC
+          LIMIT 50
+        `
+      : [];
+
     const submissionIds = submissionRows.map((row) => row.id);
     const updateIds = fixRows.map((row) => row.update_id);
+    const resolvedIds = resolvedRows.map((row) => row.issue_id);
 
     const submissionMedia =
       submissionIds.length === 0
@@ -868,8 +889,22 @@ export function createApp(deps: {
             ORDER BY e.created_at
           `;
 
+    const resolvedMedia =
+      resolvedIds.length === 0
+        ? []
+        : await sql<QueueMediaRow[]>`
+            SELECT m.id, e.issue_id AS owner_key, m.mime_type, m.private_object_key
+            FROM public.evidence e
+            JOIN public.media m ON m.id = e.media_id
+            WHERE e.issue_id = ANY(${resolvedIds}::uuid[])
+              AND e.visibility = 'public'
+              AND m.publication_permission = 'allowed'
+              AND m.upload_completed_at IS NOT NULL
+            ORDER BY e.created_at
+          `;
+
     const mediaByOwner = new Map<string, QueueMediaRow[]>();
-    for (const row of [...submissionMedia, ...fixMedia]) {
+    for (const row of [...submissionMedia, ...fixMedia, ...resolvedMedia]) {
       if (!row.owner_key) continue;
       const list = mediaByOwner.get(row.owner_key) ?? [];
       list.push(row);
@@ -883,7 +918,7 @@ export function createApp(deps: {
         mimeType: row.mime_type,
       }));
 
-    // Triage: fix evidence before new submissions (SPEC §12).
+    // Triage: fix evidence, then new submissions, then reopen candidates (SPEC §12 / §19).
     const items = [
       ...fixRows.map((row) => ({
         id: row.update_id,
@@ -920,6 +955,24 @@ export function createApp(deps: {
         description: row.description,
         sourceUrl: row.source_url,
         media: toMedia(row.id),
+      })),
+      ...resolvedRows.map((row) => ({
+        id: row.issue_id,
+        kind: "resolved" as const,
+        issueId: row.issue_id,
+        title: row.title,
+        category: row.category,
+        borough: row.borough,
+        createdAt: iso(row.created_at),
+        revision: row.revision,
+        locationText: null,
+        location:
+          row.longitude != null && row.latitude != null
+            ? { longitude: num(row.longitude), latitude: num(row.latitude) }
+            : null,
+        description: row.description,
+        sourceUrl: null,
+        media: toMedia(row.issue_id),
       })),
     ];
 
@@ -1379,6 +1432,18 @@ type QueueSubmissionRow = {
 
 type QueueFixRow = {
   update_id: string;
+  issue_id: string;
+  title: string;
+  category: string;
+  borough: string;
+  revision: number;
+  created_at: Date;
+  description: string | null;
+  longitude: number | null;
+  latitude: number | null;
+};
+
+type QueueResolvedRow = {
   issue_id: string;
   title: string;
   category: string;

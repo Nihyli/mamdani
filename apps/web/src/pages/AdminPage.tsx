@@ -26,6 +26,20 @@ import {
 
 const BOROUGHS = nycBoroughSchema.options;
 
+type Decision =
+  | "approve"
+  | "reject"
+  | "needs_info"
+  | "verify_fix"
+  | "reject_fix"
+  | "reopen";
+
+function kindLabel(kind: AdminQueueItem["kind"]): string {
+  if (kind === "fix_claim") return "Fix evidence";
+  if (kind === "resolved") return "Verified fixed · reopen";
+  return "New report";
+}
+
 export function AdminPage() {
   const auth = useAuth();
   const navigate = useNavigate();
@@ -100,9 +114,7 @@ export function AdminPage() {
     setActionError(null);
   }, [selected]);
 
-  async function decide(
-    decision: "approve" | "reject" | "needs_info" | "verify_fix" | "reject_fix",
-  ) {
+  async function decide(decision: Decision) {
     if (!selected || !auth.authHeaders) return;
     setActionError(null);
 
@@ -173,14 +185,17 @@ export function AdminPage() {
       if (e.key === "a" || e.key === "A") {
         e.preventDefault();
         if (selected.kind === "submission") void decide("approve");
-        else void decide("verify_fix");
+        else if (selected.kind === "fix_claim") void decide("verify_fix");
       } else if (e.key === "r" || e.key === "R") {
         e.preventDefault();
         if (selected.kind === "submission") void decide("reject");
-        else void decide("reject_fix");
+        else if (selected.kind === "fix_claim") void decide("reject_fix");
       } else if (e.key === "n" || e.key === "N") {
         e.preventDefault();
         if (selected.kind === "submission") setShowNeedsInfo(true);
+      } else if (e.key === "o" || e.key === "O") {
+        e.preventDefault();
+        if (selected.kind === "resolved") void decide("reopen");
       }
     }
     window.addEventListener("keydown", onKey);
@@ -209,7 +224,7 @@ export function AdminPage() {
       <Page title="Review queue">
         <EmptyState
           title="Nothing to review"
-          body="Pending submissions and fix evidence will show up here."
+          body="Pending submissions, fix evidence, and reopen candidates will show up here."
           action={
             <Link to="/" className="inline-flex min-h-11 items-center text-cobalt">
               Back to map
@@ -227,24 +242,35 @@ export function AdminPage() {
     <Page title="Review queue">
       <p className="mb-4 text-sm text-muted">
         {items.length} item{items.length === 1 ? "" : "s"} · Shortcuts:{" "}
-        <kbd className="rounded border border-border bg-white px-1.5 py-0.5 text-ink">
-          A
-        </kbd>{" "}
-        approve ·{" "}
-        <kbd className="rounded border border-border bg-white px-1.5 py-0.5 text-ink">
-          R
-        </kbd>{" "}
-        reject
-        {selected?.kind === "submission" ? (
+        {selected?.kind === "resolved" ? (
           <>
-            {" "}
-            ·{" "}
             <kbd className="rounded border border-border bg-white px-1.5 py-0.5 text-ink">
-              N
+              O
             </kbd>{" "}
-            needs info
+            reopen
           </>
-        ) : null}
+        ) : (
+          <>
+            <kbd className="rounded border border-border bg-white px-1.5 py-0.5 text-ink">
+              A
+            </kbd>{" "}
+            approve ·{" "}
+            <kbd className="rounded border border-border bg-white px-1.5 py-0.5 text-ink">
+              R
+            </kbd>{" "}
+            reject
+            {selected?.kind === "submission" ? (
+              <>
+                {" "}
+                ·{" "}
+                <kbd className="rounded border border-border bg-white px-1.5 py-0.5 text-ink">
+                  N
+                </kbd>{" "}
+                needs info
+              </>
+            ) : null}
+          </>
+        )}
       </p>
 
       <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
@@ -254,7 +280,11 @@ export function AdminPage() {
             const label =
               item.title?.trim() ||
               item.locationText?.trim() ||
-              (item.kind === "fix_claim" ? "Fix evidence" : "Untitled submission");
+              (item.kind === "fix_claim"
+                ? "Fix evidence"
+                : item.kind === "resolved"
+                  ? "Verified fixed"
+                  : "Untitled submission");
             return (
               <li key={item.id}>
                 <button
@@ -272,7 +302,7 @@ export function AdminPage() {
                       active ? "text-white/80" : "text-muted",
                     ].join(" ")}
                   >
-                    {item.kind === "fix_claim" ? "Fix evidence" : "New report"}
+                    {kindLabel(item.kind)}
                     {item.category
                       ? ` · ${CATEGORY_LABELS[item.category]}`
                       : ""}
@@ -293,10 +323,12 @@ export function AdminPage() {
                   selected.locationText?.trim() ||
                   (selected.kind === "fix_claim"
                     ? "Fix evidence"
-                    : "Untitled submission")}
+                    : selected.kind === "resolved"
+                      ? "Verified fixed"
+                      : "Untitled submission")}
               </h2>
               <p className="mt-1 text-sm text-muted">
-                {selected.kind === "fix_claim" ? "Fix evidence" : "New report"}
+                {kindLabel(selected.kind)}
                 {selected.category
                   ? ` · ${CATEGORY_LABELS[selected.category]}`
                   : ""}
@@ -466,7 +498,7 @@ export function AdminPage() {
                     </button>
                   )}
                 </>
-              ) : (
+              ) : selected.kind === "fix_claim" ? (
                 <>
                   <button
                     type="button"
@@ -485,6 +517,15 @@ export function AdminPage() {
                     Reject fix
                   </button>
                 </>
+              ) : (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void decide("reopen")}
+                  className="inline-flex min-h-11 items-center rounded-md bg-open px-4 font-semibold text-white disabled:opacity-40"
+                >
+                  Reopen as open
+                </button>
               )}
             </div>
           </div>

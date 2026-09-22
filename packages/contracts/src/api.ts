@@ -341,7 +341,12 @@ export type AdminReviewDecisionResponse = z.infer<
 
 // --- Admin review queue (GET /api/admin/queue) ----------------------------
 
-export const adminQueueItemKindSchema = z.enum(["submission", "fix_claim"]);
+export const adminQueueItemKindSchema = z.enum([
+  "submission",
+  "fix_claim",
+  /** Verified-fixed issues eligible for senior reopen (resolved → open). */
+  "resolved",
+]);
 export type AdminQueueItemKind = z.infer<typeof adminQueueItemKindSchema>;
 
 export const adminQueueMediaSchema = z.object({
