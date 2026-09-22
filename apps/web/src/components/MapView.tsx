@@ -17,9 +17,9 @@ type Props = {
 };
 
 function statusColor(status: string): string {
-  if (status === "resolved") return "#2F7A4A";
-  if (status === "fix_pending") return "#C4891A";
-  return "#C94C3D";
+  if (status === "resolved") return "#16A34A";
+  if (status === "fix_pending") return "#F59E0B";
+  return "#EF4444";
 }
 
 export function MapView({
@@ -105,9 +105,19 @@ export function MapView({
           source: "issues",
           filter: ["has", "point_count"],
           paint: {
-            "circle-color": "#255BDB",
+            "circle-color": [
+              "step",
+              ["get", "point_count"],
+              "#EF4444",
+              8,
+              "#F59E0B",
+              20,
+              "#16A34A",
+            ],
             "circle-radius": ["step", ["get", "point_count"], 16, 10, 20, 30, 26],
-            "circle-opacity": 0.85,
+            "circle-opacity": 0.88,
+            "circle-stroke-width": 3,
+            "circle-stroke-color": "#ffffff",
           },
         });
 
@@ -133,11 +143,11 @@ export function MapView({
             "circle-radius": [
               "case",
               ["boolean", ["feature-state", "selected"], false],
-              11,
-              8,
+              10,
+              6,
             ],
-            "circle-stroke-width": 2,
-            "circle-stroke-color": "#F7F5EF",
+            "circle-stroke-width": 2.5,
+            "circle-stroke-color": "#ffffff",
           },
         });
 
@@ -271,7 +281,8 @@ export function MapView({
     pinMarkerRef.current = null;
 
     const el = document.createElement("div");
-    el.className = "h-4 w-4 rounded-full border-2 border-white bg-cobalt shadow";
+    el.className =
+      "h-7 w-7 rounded-full border-[3px] border-white bg-open shadow-[0_8px_18px_rgba(239,68,68,0.4)]";
     el.setAttribute("aria-hidden", "true");
     const marker = new maplibregl.Marker({ element: el, draggable })
       .setLngLat([interactivePin.longitude, interactivePin.latitude])

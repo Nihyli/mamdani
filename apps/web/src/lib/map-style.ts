@@ -11,7 +11,7 @@
  * Do not point production traffic at the public OSM tile server.
  */
 
-import { layers, namedFlavor } from "@protomaps/basemaps";
+import { LIGHT, layers, type Flavor } from "@protomaps/basemaps";
 import type { StyleSpecification } from "maplibre-gl";
 
 const NYC_CENTER: [number, number] = [-73.97, 40.72];
@@ -27,6 +27,49 @@ const PROTOMAPS_ATTRIBUTION =
   '<a href="https://protomaps.com">Protomaps</a> © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
 
 export { NYC_CENTER, NYC_ZOOM };
+
+const MAMDANI_MAP_FLAVOR: Flavor = {
+  ...LIGHT,
+  background: "#FDFBF7",
+  earth: "#F3E8C8",
+  park_a: "#C5E0B4",
+  park_b: "#B4D6A2",
+  wood_a: "#C5E0B4",
+  wood_b: "#A8D090",
+  scrub_a: "#D8EAC8",
+  scrub_b: "#C5E0B4",
+  water: "#B8E4E8",
+  buildings: "#FFFDF8",
+  pedestrian: "#F5DCCF",
+  school: "#F5DCCF",
+  hospital: "#F2D4CC",
+  industrial: "#E9DFD0",
+  sand: "#F3E8C8",
+  beach: "#F3E8C8",
+  other: "#FFFFFF",
+  minor_service: "#FFFFFF",
+  minor_a: "#FFFFFF",
+  minor_b: "#FFFFFF",
+  link: "#FFFFFF",
+  major: "#FFFDF8",
+  highway: "#FFF8E7",
+  tunnel_other: "#E7E1D6",
+  tunnel_minor: "#E7E1D6",
+  tunnel_link: "#E7E1D6",
+  tunnel_major: "#E7E1D6",
+  tunnel_highway: "#E7E1D6",
+  roads_label_minor: "#6B7280",
+  roads_label_major: "#171717",
+  roads_label_minor_halo: "#FFFDF8",
+  roads_label_major_halo: "#FFFDF8",
+  subplace_label: "#171717",
+  subplace_label_halo: "#FFFDF8",
+  city_label: "#171717",
+  city_label_halo: "#FFFDF8",
+  state_label: "#6B7280",
+  state_label_halo: "#FFFDF8",
+  country_label: "#171717",
+};
 
 let localPmtilesAvailable: boolean | null = null;
 let localPmtilesProbe: Promise<boolean> | null = null;
@@ -75,7 +118,7 @@ function localPmtilesStyle(): StyleSpecification {
         attribution: PROTOMAPS_ATTRIBUTION,
       },
     },
-    layers: layers("protomaps", namedFlavor("light"), { lang: "en" }),
+    layers: layers("protomaps", MAMDANI_MAP_FLAVOR, { lang: "en" }),
   };
 }
 

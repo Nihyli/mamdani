@@ -4,10 +4,12 @@ import {
   type AdminQueueResponse,
   type AdminReviewDecisionRequest,
   type AdminReviewDecisionResponse,
+  type AnalysisStatus,
   type CreateIssueUpdateRequest,
   type CreateIssueUpdateResponse,
   type CreateSubmissionRequest,
   type CreateSubmissionResponse,
+  type PatchAnalysisSettingsRequest,
   type PublicIssue,
   type PublicIssueListItem,
   type PublicIssueListResponse,
@@ -19,10 +21,12 @@ import {
   adminQueueResponseSchema,
   adminReviewDecisionRequestSchema,
   adminReviewDecisionResponseSchema,
+  analysisStatusSchema,
   createIssueUpdateRequestSchema,
   createIssueUpdateResponseSchema,
   createSubmissionRequestSchema,
   createSubmissionResponseSchema,
+  patchAnalysisSettingsRequestSchema,
   publicIssueListResponseSchema,
   publicIssueSchema,
   submissionStatusResponseSchema,
@@ -239,6 +243,28 @@ export async function getAdminQueue(
   });
 }
 
+export async function getAnalysisStatus(
+  auth: AuthHeaders,
+): Promise<AnalysisStatus> {
+  return requestJson("/api/admin/analysis", {
+    auth,
+    schema: analysisStatusSchema,
+  });
+}
+
+export async function patchAnalysisSettings(
+  body: PatchAnalysisSettingsRequest,
+  auth: AuthHeaders,
+): Promise<AnalysisStatus> {
+  const validated = patchAnalysisSettingsRequestSchema.parse(body);
+  return requestJson("/api/admin/analysis", {
+    method: "PATCH",
+    auth,
+    body: validated,
+    schema: analysisStatusSchema,
+  });
+}
+
 export async function postAdminDecision(
   id: string,
   body: AdminReviewDecisionRequest,
@@ -320,6 +346,59 @@ export async function sha256Hex(file: Blob): Promise<string> {
   return [...new Uint8Array(hash)]
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
+}
+
+export type SnapshotFeature = {
+  id: string;
+  shortId: string;
+  slug: string;
+  path: string;
+  category: PublicIssueListItem["category"];
+  status: PublicIssueListItem["status"];
+  borough: PublicIssueListItem["borough"];
+  longitude: number;
+  latitude: number;
+  title: string;
+  supportCount: number;
+  revision: number;
+  createdAt?: string;
+  resolvedAt?: string | null;
+};
+
+export async function fetchPublicSnapshot(
+  borough?: PublicIssueListItem["borough"],
+): Promise<{
+  version: string;
+  updatedLabel: string;
+  features: SnapshotFeature[];
+} | null> {
+  const manifestRes = await fetch(`${API_BASE}/api/public/manifest`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!manifestRes.ok) return null;
+  const manifest = (await manifestRes.json()) as {
+    version: string;
+    updatedLabel: string;
+    boroughs: { key: string; path: string }[];
+  };
+  if (!manifest.version || manifest.version === "none") return null;
+  const key = borough ?? "citywide";
+  const entry =
+    manifest.boroughs.find((b) => b.key === key) ??
+    manifest.boroughs.find((b) => b.key === "citywide");
+  if (!entry) return null;
+  const snapRes = await fetch(`${API_BASE}${entry.path}`, {
+    headers: { Accept: "application/json" },
+  });
+  if (!snapRes.ok) return null;
+  const snap = (await snapRes.json()) as {
+    features: SnapshotFeature[];
+  };
+  return {
+    version: manifest.version,
+    updatedLabel: manifest.updatedLabel,
+    features: snap.features ?? [],
+  };
 }
 
 export function duplicateSourcePath(
