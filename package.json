@@ -1,0 +1,20 @@
+{
+  "name": "mamdani-ticketer",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "typecheck": "npm run typecheck -w @mamdani-ticketer/contracts && npm run typecheck -w @mamdani-ticketer/api && npm run typecheck -w @mamdani-ticketer/web",
+    "dev:api": "npm run dev -w @mamdani-ticketer/api",
+    "dev:web": "npm run dev -w @mamdani-ticketer/web",
+    "test:api": "npm run test -w @mamdani-ticketer/api",
+    "db:local": "bash db/scripts/local.sh",
+    "db:seed": "bash db/scripts/seed.sh"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
