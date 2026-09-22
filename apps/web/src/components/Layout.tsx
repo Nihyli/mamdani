@@ -94,6 +94,9 @@ export function SiteFooter() {
           <Link to="/privacy" className="underline-offset-2 hover:underline">
             Privacy
           </Link>
+          <Link to="/admin" className="underline-offset-2 hover:underline">
+            Review
+          </Link>
           <Link to="/sign-in" className="underline-offset-2 hover:underline">
             Sign in
           </Link>

@@ -1,20 +1,33 @@
 import {
   apiErrorSchema,
   type ApiError,
+  type AdminQueueResponse,
+  type AdminReviewDecisionRequest,
+  type AdminReviewDecisionResponse,
+  type CreateIssueUpdateRequest,
+  type CreateIssueUpdateResponse,
   type CreateSubmissionRequest,
   type CreateSubmissionResponse,
   type PublicIssue,
   type PublicIssueListItem,
   type PublicIssueListResponse,
   type SubmissionStatusResponse,
+  type SupportToggleResponse,
   type UploadCompleteResponse,
   type UploadSignRequest,
   type UploadSignResponse,
+  adminQueueResponseSchema,
+  adminReviewDecisionRequestSchema,
+  adminReviewDecisionResponseSchema,
+  createIssueUpdateRequestSchema,
+  createIssueUpdateResponseSchema,
   createSubmissionRequestSchema,
   createSubmissionResponseSchema,
   publicIssueListResponseSchema,
   publicIssueSchema,
   submissionStatusResponseSchema,
+  supportToggleRequestSchema,
+  supportToggleResponseSchema,
   uploadCompleteResponseSchema,
   uploadSignRequestSchema,
   uploadSignResponseSchema,
@@ -214,6 +227,57 @@ export async function getSubmission(
   return requestJson(`/api/submissions/${id}`, {
     auth,
     schema: submissionStatusResponseSchema,
+  });
+}
+
+export async function getAdminQueue(
+  auth: AuthHeaders,
+): Promise<AdminQueueResponse> {
+  return requestJson("/api/admin/queue", {
+    auth,
+    schema: adminQueueResponseSchema,
+  });
+}
+
+export async function postAdminDecision(
+  id: string,
+  body: AdminReviewDecisionRequest,
+  auth: AuthHeaders,
+): Promise<AdminReviewDecisionResponse> {
+  const validated = adminReviewDecisionRequestSchema.parse(body);
+  return requestJson(`/api/admin/reviews/${id}/decision`, {
+    method: "POST",
+    auth,
+    body: validated,
+    schema: adminReviewDecisionResponseSchema,
+  });
+}
+
+export async function setIssueSupport(
+  issueId: string,
+  supported: boolean,
+  auth: AuthHeaders,
+): Promise<SupportToggleResponse> {
+  const body = supportToggleRequestSchema.parse({ supported });
+  return requestJson(`/api/issues/${issueId}/support`, {
+    method: "PUT",
+    auth,
+    body,
+    schema: supportToggleResponseSchema,
+  });
+}
+
+export async function createIssueUpdate(
+  issueId: string,
+  body: CreateIssueUpdateRequest,
+  auth: AuthHeaders,
+): Promise<CreateIssueUpdateResponse> {
+  const validated = createIssueUpdateRequestSchema.parse(body);
+  return requestJson(`/api/issues/${issueId}/updates`, {
+    method: "POST",
+    auth,
+    body: validated,
+    schema: createIssueUpdateResponseSchema,
   });
 }
 

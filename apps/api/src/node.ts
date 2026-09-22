@@ -26,11 +26,20 @@ const objectStore =
     ? new MemoryObjectStore(config.publicUploadBaseUrl)
     : new FilesystemObjectStore(uploadDir, config.publicUploadBaseUrl);
 
-const authenticate: Authenticate = async (authorization, devUser, devRole) => {
-  if (config.allowDevAuth && devUser) {
+const authenticate: Authenticate = async (authorization, digUser, digRole) => {
+  if (config.allowDevAuth && digUser) {
+    let role: ProfileRole = "user";
+    if (digRole) {
+      role = parseRole(digRole);
+    } else if (sql) {
+      const [profile] = await sql<{ role: ProfileRole }[]>`
+        SELECT role FROM public.profiles WHERE id = ${digUser}::uuid
+      `;
+      if (profile) role = profile.role;
+    }
     return {
-      id: devUser,
-      role: parseRole(devRole),
+      id: digUser,
+      role,
       emailVerified: true,
     };
   }

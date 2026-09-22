@@ -338,3 +338,39 @@ export const adminReviewDecisionResponseSchema = z.object({
 export type AdminReviewDecisionResponse = z.infer<
   typeof adminReviewDecisionResponseSchema
 >;
+
+// --- Admin review queue (GET /api/admin/queue) ----------------------------
+
+export const adminQueueItemKindSchema = z.enum(["submission", "fix_claim"]);
+export type AdminQueueItemKind = z.infer<typeof adminQueueItemKindSchema>;
+
+export const adminQueueMediaSchema = z.object({
+  id: uuid,
+  url: z.string().url(),
+  mimeType: z.string().min(1),
+});
+export type AdminQueueMedia = z.infer<typeof adminQueueMediaSchema>;
+
+export const adminQueueItemSchema = z.object({
+  /** Submission id or update id — use with kind to call the decision endpoint. */
+  id: uuid,
+  kind: adminQueueItemKindSchema,
+  issueId: uuid.nullable(),
+  title: z.string().nullable(),
+  category: issueCategorySchema.nullable(),
+  borough: nycBoroughSchema.nullable(),
+  createdAt: isoDateTime,
+  /** Submission.revision or issue.revision — pass as expectedRevision on decision. */
+  revision: z.number().int().positive(),
+  locationText: z.string().nullable().optional(),
+  location: geoPointSchema.nullable().optional(),
+  description: z.string().nullable().optional(),
+  sourceUrl: z.string().url().nullable().optional(),
+  media: z.array(adminQueueMediaSchema).default([]),
+});
+export type AdminQueueItem = z.infer<typeof adminQueueItemSchema>;
+
+export const adminQueueResponseSchema = z.object({
+  items: z.array(adminQueueItemSchema),
+});
+export type AdminQueueResponse = z.infer<typeof adminQueueResponseSchema>;

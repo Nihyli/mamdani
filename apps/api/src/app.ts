@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import postgres from "postgres";
 import {
+  adminQueueResponseSchema,
   adminReviewDecisionRequestSchema,
   createIssueFlagRequestSchema,
   createIssueUpdateRequestSchema,
@@ -697,6 +698,23 @@ export function createApp(deps: {
       `;
       const row = inserted[0];
       if (!row) throw new HttpError(500, "internal_error", "Update was not saved.");
+      if (input.mediaIds.length > 0) {
+        await tx`
+          INSERT INTO public.evidence (
+            media_id, issue_id, update_id, provenance, visibility
+          )
+          SELECT
+            m.id,
+            ${issue.id}::uuid,
+            ${row.id}::uuid,
+            'user_upload',
+            'reviewers_only'
+          FROM public.media m
+          WHERE m.owner_id = ${user.id}::uuid
+            AND m.id = ANY(${input.mediaIds}::uuid[])
+            AND m.upload_completed_at IS NOT NULL
+        `;
+      }
       if (input.kind === "fix_claim" && issue.status === "open") {
         await tx`
           SELECT app.transition_issue_status(
@@ -735,6 +753,134 @@ export function createApp(deps: {
     const flag = inserted[0];
     if (!flag) throw new HttpError(500, "internal_error", "Flag was not saved.");
     return c.json({ id: flag.id, accepted: true });
+  });
+
+  app.get("/api/admin/queue", async (c) => {
+    const sql = requireSql(deps.sql);
+    const user = requireVerified(c.get("user"));
+    if (!MODERATOR_ROLES.has(user.role)) {
+      throw new HttpError(403, "forbidden", "Moderator role required.");
+    }
+
+    const submissionRows = await sql<QueueSubmissionRow[]>`
+      SELECT
+        s.id,
+        s.title,
+        s.category,
+        s.description,
+        s.location_text,
+        ST_X(s.location) AS longitude,
+        ST_Y(s.location) AS latitude,
+        s.revision,
+        s.created_at,
+        sp.canonical_url AS source_url
+      FROM public.submissions s
+      LEFT JOIN public.source_posts sp ON sp.id = s.source_post_id
+      WHERE s.processing_state = 'pending_review'
+      ORDER BY s.created_at DESC, s.id DESC
+    `;
+
+    const fixRows = await sql<QueueFixRow[]>`
+      SELECT
+        u.id AS update_id,
+        i.id AS issue_id,
+        i.title,
+        i.category,
+        i.borough,
+        i.revision,
+        u.created_at,
+        u.body AS description,
+        ST_X(i.geometry) AS longitude,
+        ST_Y(i.geometry) AS latitude
+      FROM public.updates u
+      JOIN public.issues i ON i.id = u.issue_id
+      WHERE u.kind = 'fix_claim'
+        AND u.moderation_state = 'pending'
+      ORDER BY u.created_at DESC, u.id DESC
+    `;
+
+    const submissionIds = submissionRows.map((row) => row.id);
+    const updateIds = fixRows.map((row) => row.update_id);
+
+    const submissionMedia =
+      submissionIds.length === 0
+        ? []
+        : await sql<QueueMediaRow[]>`
+            SELECT m.id, m.submission_id AS owner_key, m.mime_type, m.private_object_key
+            FROM public.media m
+            WHERE m.submission_id = ANY(${submissionIds}::uuid[])
+              AND m.upload_completed_at IS NOT NULL
+            ORDER BY m.created_at
+          `;
+
+    const fixMedia =
+      updateIds.length === 0
+        ? []
+        : await sql<QueueMediaRow[]>`
+            SELECT m.id, e.update_id AS owner_key, m.mime_type, m.private_object_key
+            FROM public.evidence e
+            JOIN public.media m ON m.id = e.media_id
+            WHERE e.update_id = ANY(${updateIds}::uuid[])
+              AND m.upload_completed_at IS NOT NULL
+            ORDER BY e.created_at
+          `;
+
+    const mediaByOwner = new Map<string, QueueMediaRow[]>();
+    for (const row of [...submissionMedia, ...fixMedia]) {
+      if (!row.owner_key) continue;
+      const list = mediaByOwner.get(row.owner_key) ?? [];
+      list.push(row);
+      mediaByOwner.set(row.owner_key, list);
+    }
+
+    const toMedia = (ownerKey: string) =>
+      (mediaByOwner.get(ownerKey) ?? []).map((row) => ({
+        id: row.id,
+        url: `${config.publicUploadBaseUrl}/${row.private_object_key}`,
+        mimeType: row.mime_type,
+      }));
+
+    // Triage: fix evidence before new submissions (SPEC §12).
+    const items = [
+      ...fixRows.map((row) => ({
+        id: row.update_id,
+        kind: "fix_claim" as const,
+        issueId: row.issue_id,
+        title: row.title,
+        category: row.category,
+        borough: row.borough,
+        createdAt: iso(row.created_at),
+        revision: row.revision,
+        locationText: null,
+        location:
+          row.longitude != null && row.latitude != null
+            ? { longitude: num(row.longitude), latitude: num(row.latitude) }
+            : null,
+        description: row.description,
+        sourceUrl: null,
+        media: toMedia(row.update_id),
+      })),
+      ...submissionRows.map((row) => ({
+        id: row.id,
+        kind: "submission" as const,
+        issueId: null,
+        title: row.title,
+        category: row.category,
+        borough: null,
+        createdAt: iso(row.created_at),
+        revision: row.revision,
+        locationText: row.location_text,
+        location:
+          row.longitude != null && row.latitude != null
+            ? { longitude: num(row.longitude), latitude: num(row.latitude) }
+            : null,
+        description: row.description,
+        sourceUrl: row.source_url,
+        media: toMedia(row.id),
+      })),
+    ];
+
+    return c.json(adminQueueResponseSchema.parse({ items }));
   });
 
   app.post("/api/admin/reviews/:id/decision", async (c) => {
@@ -936,6 +1082,39 @@ async function decideIssue(
     )
   `;
   if (!updated) throw new HttpError(500, "internal_error", "Status was not updated.");
+  if (input.decision === "verify_fix" || input.decision === "reject_fix") {
+    await sql`
+      UPDATE public.updates
+      SET moderation_state = ${
+        input.decision === "verify_fix" ? "approved" : "rejected"
+      }::public.moderation_state,
+          updated_at = now()
+      WHERE issue_id = ${issue.id}::uuid
+        AND kind = 'fix_claim'
+        AND moderation_state = 'pending'
+    `;
+    if (input.decision === "verify_fix") {
+      await sql`
+        UPDATE public.media m
+        SET publication_permission = 'allowed'
+        FROM public.evidence e
+        JOIN public.updates u ON u.id = e.update_id
+        WHERE e.media_id = m.id
+          AND u.issue_id = ${issue.id}::uuid
+          AND u.kind = 'fix_claim'
+          AND u.moderation_state = 'approved'
+      `;
+      await sql`
+        UPDATE public.evidence e
+        SET visibility = 'public'
+        FROM public.updates u
+        WHERE e.update_id = u.id
+          AND u.issue_id = ${issue.id}::uuid
+          AND u.kind = 'fix_claim'
+          AND u.moderation_state = 'approved'
+      `;
+    }
+  }
   return {
     issueId: issue.id,
     issueStatus: updated.status,
@@ -1140,6 +1319,39 @@ type FullSubmission = {
   location_precision: string | null;
   source_post_id: string | null;
   revision: number;
+};
+
+type QueueSubmissionRow = {
+  id: string;
+  title: string | null;
+  category: string | null;
+  description: string | null;
+  location_text: string | null;
+  longitude: number | null;
+  latitude: number | null;
+  revision: number;
+  created_at: Date;
+  source_url: string | null;
+};
+
+type QueueFixRow = {
+  update_id: string;
+  issue_id: string;
+  title: string;
+  category: string;
+  borough: string;
+  revision: number;
+  created_at: Date;
+  description: string | null;
+  longitude: number | null;
+  latitude: number | null;
+};
+
+type QueueMediaRow = {
+  id: string;
+  owner_key: string | null;
+  mime_type: string;
+  private_object_key: string;
 };
 
 function listItem(row: IssueListRow) {

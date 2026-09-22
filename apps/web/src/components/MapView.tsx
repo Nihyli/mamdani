@@ -203,7 +203,7 @@ export function MapView({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !onPinMove) return;
+    if (!map) return;
 
     if (!interactivePin) {
       pinMarkerRef.current?.remove();
@@ -211,19 +211,40 @@ export function MapView({
       return;
     }
 
-    if (!pinMarkerRef.current) {
-      const el = document.createElement("div");
-      el.className = "h-4 w-4 rounded-full border-2 border-white bg-cobalt shadow";
-      el.setAttribute("aria-hidden", "true");
-      const marker = new maplibregl.Marker({ element: el, draggable: true })
-        .setLngLat([interactivePin.longitude, interactivePin.latitude])
-        .addTo(map);
+    const draggable = Boolean(onPinMove);
+    const existing = pinMarkerRef.current;
+    const dragModeChanged =
+      existing != null &&
+      (existing.isDraggable?.() ?? false) !== draggable;
+
+    if (existing && !dragModeChanged) {
+      existing.setLngLat([interactivePin.longitude, interactivePin.latitude]);
+      return;
+    }
+
+    existing?.remove();
+    pinMarkerRef.current = null;
+
+    const el = document.createElement("div");
+    el.className = "h-4 w-4 rounded-full border-2 border-white bg-cobalt shadow";
+    el.setAttribute("aria-hidden", "true");
+    const marker = new maplibregl.Marker({ element: el, draggable })
+      .setLngLat([interactivePin.longitude, interactivePin.latitude])
+      .addTo(map);
+    map.easeTo({
+      center: [interactivePin.longitude, interactivePin.latitude],
+      zoom: Math.max(map.getZoom(), 14),
+      duration: 400,
+    });
+    if (draggable) {
       marker.on("dragend", () => {
         const { lng, lat } = marker.getLngLat();
         onPinMoveRef.current?.(lng, lat);
       });
-      pinMarkerRef.current = marker;
+    }
+    pinMarkerRef.current = marker;
 
+    if (draggable) {
       const clickHandler = (e: maplibregl.MapMouseEvent) => {
         marker.setLngLat(e.lngLat);
         onPinMoveRef.current?.(e.lngLat.lng, e.lngLat.lat);
@@ -233,11 +254,6 @@ export function MapView({
         map.off("click", clickHandler);
       };
     }
-
-    pinMarkerRef.current.setLngLat([
-      interactivePin.longitude,
-      interactivePin.latitude,
-    ]);
   }, [interactivePin, onPinMove]);
 
   return (
