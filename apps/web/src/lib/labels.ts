@@ -35,8 +35,8 @@ export const STATUS_LABELS: Record<
 
 export const PROCESSING_LABELS: Record<ProcessingState, string> = {
   draft: "Draft",
-  queued: "Uploaded",
-  processing: "Uploaded",
+  queued: "Analyzing",
+  processing: "Analyzing",
   needs_input: "Needs more info",
   pending_review: "Pending review",
   accepted: "Published",

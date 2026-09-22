@@ -15,47 +15,21 @@ export function StatusBadge({
 }) {
   const color =
     status === "open"
-      ? "bg-open/15 text-open"
+      ? "border-open/20 bg-open/10 text-open"
       : status === "fix_pending"
-        ? "bg-pending/15 text-pending"
-        : "bg-fixed/15 text-fixed";
+        ? "border-pending/25 bg-pending/10 text-pending"
+        : "border-fixed/20 bg-fixed/10 text-fixed";
   return (
     <span
-      className={`inline-flex min-h-8 items-center gap-1.5 rounded px-2 text-xs font-semibold ${color}`}
+      className={`inline-flex min-h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-semibold ${color}`}
     >
-      <StatusDot status={status} />
+      <span
+        className={`h-1.5 w-1.5 rounded-full ${
+          status === "open" ? "bg-open" : status === "fix_pending" ? "bg-pending" : "bg-fixed"
+        }`}
+      />
       {STATUS_LABELS[status]}
     </span>
-  );
-}
-
-function StatusDot({
-  status,
-}: {
-  status: "open" | "fix_pending" | "resolved";
-}) {
-  const fill =
-    status === "open" ? "#C94C3D" : status === "fix_pending" ? "#C4891A" : "#2F7A4A";
-  return (
-    <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
-      {status === "resolved" ? (
-        <path
-          d="M2.5 6.2 4.8 8.5 9.5 3.5"
-          fill="none"
-          stroke={fill}
-          strokeWidth="1.8"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      ) : status === "fix_pending" ? (
-        <>
-          <circle cx="6" cy="6" r="4.2" fill="none" stroke={fill} strokeWidth="1.5" />
-          <path d="M6 3.5v3l2 1.2" fill="none" stroke={fill} strokeWidth="1.4" strokeLinecap="round" />
-        </>
-      ) : (
-        <circle cx="6" cy="6" r="3.5" fill={fill} />
-      )}
-    </svg>
   );
 }
 
@@ -78,30 +52,48 @@ export function IssueCard({
           <img
             src={issue.thumbnailUrl}
             alt=""
-            className="h-16 w-16 shrink-0 rounded object-cover"
+            className="h-16 w-16 shrink-0 rounded-[10px] border border-border object-cover"
           />
         ) : (
-          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded bg-border/60 text-xs text-muted">
+          <div className="flex h-16 w-16 shrink-0 flex-col items-center justify-center rounded-[10px] border border-border bg-panel text-center text-[10px] font-semibold uppercase tracking-wide text-muted">
             No photo
           </div>
         )}
         <div className="min-w-0 flex-1">
-          <div className="mb-1 flex flex-wrap items-center gap-2">
-            <StatusBadge status={status} />
-            <span className="text-xs text-muted">{formatAge(issue.createdAt)}</span>
-          </div>
-          <h3 className="truncate font-semibold leading-snug">{issue.title}</h3>
+          <h3 className="truncate text-[15px] font-bold leading-snug tracking-tight">
+            {issue.title}
+          </h3>
           <p className="truncate text-sm text-muted">
-            {CATEGORY_LABELS[issue.category]} · {BOROUGH_LABELS[issue.borough]}
+            {BOROUGH_LABELS[issue.borough]}
           </p>
+          <p className="mt-0.5 line-clamp-1 text-xs text-muted">
+            {CATEGORY_LABELS[issue.category]}
+          </p>
+          <div className="mt-1.5 flex items-center justify-between gap-2">
+            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted">
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  status === "open"
+                    ? "bg-open"
+                    : status === "fix_pending"
+                      ? "bg-pending"
+                      : "bg-fixed"
+                }`}
+              />
+              {status === "resolved" ? "Fixed" : STATUS_LABELS[status]}{" "}
+              {formatAge(issue.createdAt)}
+            </span>
+          </div>
         </div>
       </div>
     </>
   );
 
   const className = [
-    "block w-full border-b border-border px-3 py-3 text-left transition-colors",
-    selected ? "bg-cobalt/10" : "hover:bg-border/40",
+    "block w-full rounded-xl border px-3 py-3 text-left mock-card-shadow transition-colors",
+    selected
+      ? "border-cobalt bg-cobalt/5"
+      : "border-border bg-surface hover:border-border-strong",
   ].join(" ");
 
   if (to) {
