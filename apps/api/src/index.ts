@@ -6,6 +6,7 @@
 import postgres from "postgres";
 import { createApp, type Authenticate } from "./app.js";
 import { configFromEnv } from "./config.js";
+import { MemoryArtifactStore } from "./lib/artifacts.js";
 import { MemoryObjectStore } from "./object-store.js";
 
 const config = configFromEnv();
@@ -18,6 +19,7 @@ const app = createApp({
   sql,
   authenticate,
   objectStore: new MemoryObjectStore(config.publicUploadBaseUrl),
+  artifacts: new MemoryArtifactStore(config.publicApiBaseUrl),
   config,
 });
 

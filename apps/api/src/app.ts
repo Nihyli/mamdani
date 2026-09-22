@@ -4,9 +4,11 @@ import postgres from "postgres";
 import {
   adminQueueResponseSchema,
   adminReviewDecisionRequestSchema,
+  analysisProposalSchema,
   createIssueFlagRequestSchema,
   createIssueUpdateRequestSchema,
   createSubmissionRequestSchema,
+  patchAnalysisSettingsRequestSchema,
   patchSubmissionRequestSchema,
   publicIssueListQuerySchema,
   publicIssueListResponseSchema,
@@ -16,11 +18,17 @@ import {
   uploadCompleteRequestSchema,
   uploadSignRequestSchema,
   type AdminReviewDecisionRequest,
+  type AnalysisProposal,
   type ProfileRole,
 } from "@mamdani-ticketer/contracts";
 import type { ApiConfig } from "./config.js";
 import { insideNycBbox } from "./config.js";
 import { HttpError, mapDatabaseError } from "./lib/http-error.js";
+import {
+  canAdmitAnalysis,
+  initialProcessingState,
+  spendWarningLevel,
+} from "./lib/analysis-rules.js";
 import {
   dailySubmissionLimit,
   decideIdempotency,
@@ -38,7 +46,10 @@ import {
   assertObjectKey,
   type ObjectStore,
 } from "./object-store.js";
-
+import type { ArtifactStore } from "./lib/artifacts.js";
+import { registerM3Routes } from "./lib/m3-routes.js";
+import { enqueueIssueTransitionOutbox } from "./lib/outbox.js";
+import { configureMonitoring, reportEvent } from "./lib/monitoring.js";
 export type Sql = ReturnType<typeof postgres>;
 
 export type AuthUser = {
@@ -72,10 +83,12 @@ export function createApp(deps: {
   sql: Sql | null;
   authenticate: Authenticate;
   objectStore: ObjectStore;
+  artifacts: ArtifactStore;
   config: ApiConfig;
 }) {
-  const { config, objectStore } = deps;
+  const { config, objectStore, artifacts } = deps;
   const app = new Hono<{ Variables: AppVars }>();
+  configureMonitoring(process.env);
 
   app.use(
     "*",
@@ -107,6 +120,12 @@ export function createApp(deps: {
     if (mapped) {
       return c.json({ code: mapped.code, message: mapped.message }, mapped.status as 409);
     }
+    void reportEvent({
+      level: "error",
+      message: "unhandled_api_error",
+      code: "internal_error",
+      extra: { error: err instanceof Error ? err.message : "unknown" },
+    });
     console.error(err);
     return c.json(
       { code: "internal_error", message: "Something went wrong." },
@@ -118,14 +137,19 @@ export function createApp(deps: {
     c.json({ name: config.brandName, disclaimer: config.disclaimer }),
   );
 
-  app.get("/health", (c) => c.json({ ok: true }));
+  registerM3Routes(app, {
+    sql: deps.sql,
+    artifacts,
+    config,
+    publicApiBaseUrl: config.publicApiBaseUrl,
+  });
 
   // Crawler/OG HTML for /r/{slug}-{shortId}; social bots do not run the React SPA.
   app.get("/r/:slug", async (c) => {
     const sql = requireSql(deps.sql);
     const slugParam = c.req.param("slug");
-    const rows = await sql<ShareIssueRow[]>`
-      SELECT i.title, i.status, i.borough, i.slug, i.short_id
+    const rows = await sql<(ShareIssueRow & { id: string })[]>`
+      SELECT i.id, i.title, i.status, i.borough, i.slug, i.short_id
       FROM public.issues i
       WHERE (i.slug || '-' || i.short_id) = ${slugParam}
         AND i.status IN ('open', 'fix_pending', 'resolved')
@@ -148,6 +172,18 @@ export function createApp(deps: {
       return c.html(html, 404);
     }
 
+    const [ogCard] = await sql<{ object_key: string }[]>`
+      SELECT object_key FROM public.share_cards
+      WHERE issue_id = ${issue.id}::uuid
+        AND kind = 'og'
+        AND purged_at IS NULL
+      ORDER BY revision DESC
+      LIMIT 1
+    `;
+    const imageUrl = ogCard
+      ? artifacts.publicUrl(ogCard.object_key)
+      : undefined;
+
     const statusLabel = SHARE_STATUS_LABELS[issue.status] ?? issue.status;
     const boroughLabel = SHARE_BOROUGH_LABELS[issue.borough] ?? issue.borough;
     const description = `${statusLabel}. ${boroughLabel}. ${config.disclaimer}`;
@@ -158,6 +194,7 @@ export function createApp(deps: {
       brandName: config.brandName,
       bodyLink: appUrl,
       bodyText: "Open this report on the map.",
+      imageUrl,
     });
     c.header("Cache-Control", "public, max-age=30");
     return c.html(html, 200);
@@ -439,6 +476,35 @@ export function createApp(deps: {
 
       await assertOwnedMedia(tx, user.id, input.mediaIds);
 
+      const [settings] = await tx<{
+        analysis_enabled: boolean;
+        analysis_paused: boolean;
+        daily_cap_cents: number;
+        monthly_cap_cents: number;
+        pipeline_version: string;
+      }[]>`
+        SELECT analysis_enabled, analysis_paused, daily_cap_cents, monthly_cap_cents, pipeline_version
+        FROM public.analysis_settings WHERE id = 1
+      `;
+      const [spend] = await tx<{ daily: number; monthly: number }[]>`
+        SELECT
+          app.analysis_spend_cents(date_trunc('day', now() AT TIME ZONE 'utc')) AS daily,
+          app.analysis_spend_cents(date_trunc('month', now() AT TIME ZONE 'utc')) AS monthly
+      `;
+      const budgetDecision = canAdmitAnalysis(
+        {
+          enabled: settings?.analysis_enabled ?? config.analysisEnabledDefault,
+          paused: settings?.analysis_paused ?? false,
+          dailyCapCents: settings?.daily_cap_cents ?? 500,
+          monthlyCapCents: settings?.monthly_cap_cents ?? 10_000,
+          dailySpendCents: spend?.daily ?? 0,
+          monthlySpendCents: spend?.monthly ?? 0,
+        },
+        config.analysisEstimateCents,
+      );
+      const processingState = initialProcessingState(budgetDecision.admit);
+      const pipelineVersion = settings?.pipeline_version ?? "m2.v1";
+
       let sourcePostId: string | null = null;
       if (source) {
         const inserted = await tx<{ id: string }[]>`
@@ -459,7 +525,7 @@ export function createApp(deps: {
         ) VALUES (
           ${user.id}::uuid,
           ${input.kind}::public.submission_kind,
-          'pending_review',
+          ${processingState}::public.processing_state,
           ${input.category}::public.issue_category,
           ${input.title ?? null},
           ${input.description ?? null},
@@ -494,6 +560,32 @@ export function createApp(deps: {
             AND id = ANY(${input.mediaIds}::uuid[])
         `;
       }
+
+      if (budgetDecision.admit) {
+        await tx`
+          INSERT INTO public.jobs (
+            submission_id, stage, state, pipeline_version, payload
+          ) VALUES (
+            ${submission.id}::uuid,
+            'analyze',
+            'pending',
+            ${pipelineVersion},
+            ${JSON.stringify({
+              estimate_cents: config.analysisEstimateCents,
+              category: input.category,
+              location_text: input.locationText,
+            })}::jsonb
+          )
+        `;
+        await tx`
+          INSERT INTO public.outbox (topic, payload)
+          VALUES (
+            'analysis.enqueued',
+            ${JSON.stringify({ submission_id: submission.id })}::jsonb
+          )
+        `;
+      }
+
       return {
         id: submission.id,
         processing_state: submission.processing_state,
@@ -501,7 +593,6 @@ export function createApp(deps: {
         fingerprint: incoming,
       };
     });
-
     return c.json(
       {
         id: created.id,
@@ -919,6 +1010,124 @@ export function createApp(deps: {
       }));
 
     // Triage: fix evidence, then new submissions, then reopen candidates (SPEC §12 / §19).
+    const proposalBySubmission = new Map<string, AnalysisProposal>();
+    const locationCandidatesBySubmission = new Map<
+      string,
+      {
+        id: string;
+        location: { longitude: number; latitude: number };
+        precision: string;
+        provider: string | null;
+        verification: string;
+      }[]
+    >();
+    const duplicatesBySubmission = new Map<
+      string,
+      {
+        issueId: string;
+        shortId: string;
+        slug: string;
+        path: string;
+        title: string;
+        category: string;
+        status: "open" | "fix_pending" | "resolved";
+        distanceMeters: number;
+      }[]
+    >();
+
+    if (submissionIds.length > 0) {
+      const proposals = await sql<
+        { submission_id: string; proposal: unknown }[]
+      >`
+        SELECT submission_id, proposal
+        FROM public.analysis_proposals
+        WHERE submission_id = ANY(${submissionIds}::uuid[])
+      `;
+      for (const row of proposals) {
+        const parsed = analysisProposalSchema.safeParse(row.proposal);
+        if (parsed.success) {
+          proposalBySubmission.set(row.submission_id, parsed.data);
+        }
+      }
+
+      const locRows = await sql<
+        {
+          id: string;
+          submission_id: string;
+          longitude: number;
+          latitude: number;
+          precision: string;
+          provider: string | null;
+          verification: string;
+        }[]
+      >`
+        SELECT
+          id,
+          submission_id,
+          ST_X(geometry) AS longitude,
+          ST_Y(geometry) AS latitude,
+          precision::text,
+          provider,
+          verification
+        FROM public.location_candidates
+        WHERE submission_id = ANY(${submissionIds}::uuid[])
+        ORDER BY created_at
+      `;
+      for (const row of locRows) {
+        const list = locationCandidatesBySubmission.get(row.submission_id) ?? [];
+        list.push({
+          id: row.id,
+          location: {
+            longitude: num(row.longitude),
+            latitude: num(row.latitude),
+          },
+          precision: row.precision,
+          provider: row.provider,
+          verification: row.verification,
+        });
+        locationCandidatesBySubmission.set(row.submission_id, list);
+      }
+
+      for (const row of submissionRows) {
+        if (row.longitude == null || row.latitude == null) {
+          duplicatesBySubmission.set(row.id, []);
+          continue;
+        }
+        const nearby = await sql<
+          {
+            issue_id: string;
+            short_id: string;
+            slug: string;
+            title: string;
+            category: string;
+            status: string;
+            distance_m: number;
+          }[]
+        >`
+          SELECT * FROM app.nearby_issue_candidates(
+            ${num(row.longitude)}::float8,
+            ${num(row.latitude)}::float8,
+            50::float8,
+            ${row.category}::public.issue_category,
+            10
+          )
+        `;
+        duplicatesBySubmission.set(
+          row.id,
+          nearby.map((n) => ({
+            issueId: n.issue_id,
+            shortId: n.short_id,
+            slug: n.slug,
+            path: `/r/${n.slug}-${n.short_id}`,
+            title: n.title,
+            category: n.category,
+            status: n.status as "open" | "fix_pending" | "resolved",
+            distanceMeters: Math.round(num(n.distance_m) * 10) / 10,
+          })),
+        );
+      }
+    }
+
     const items = [
       ...fixRows.map((row) => ({
         id: row.update_id,
@@ -937,6 +1146,9 @@ export function createApp(deps: {
         description: row.description,
         sourceUrl: null,
         media: toMedia(row.update_id),
+        analysisProposal: null,
+        duplicateCandidates: [],
+        locationCandidates: [],
       })),
       ...submissionRows.map((row) => ({
         id: row.id,
@@ -955,6 +1167,9 @@ export function createApp(deps: {
         description: row.description,
         sourceUrl: row.source_url,
         media: toMedia(row.id),
+        analysisProposal: proposalBySubmission.get(row.id) ?? null,
+        duplicateCandidates: duplicatesBySubmission.get(row.id) ?? [],
+        locationCandidates: locationCandidatesBySubmission.get(row.id) ?? [],
       })),
       ...resolvedRows.map((row) => ({
         id: row.issue_id,
@@ -973,10 +1188,48 @@ export function createApp(deps: {
         description: row.description,
         sourceUrl: null,
         media: toMedia(row.issue_id),
+        analysisProposal: null,
+        duplicateCandidates: [],
+        locationCandidates: [],
       })),
     ];
 
     return c.json(adminQueueResponseSchema.parse({ items }));
+  });
+
+  app.get("/api/admin/analysis", async (c) => {
+    const sql = requireSql(deps.sql);
+    const user = requireVerified(c.get("user"));
+    if (!MODERATOR_ROLES.has(user.role)) {
+      throw new HttpError(403, "forbidden", "Moderator role required.");
+    }
+    const status = await loadAnalysisStatus(sql, config);
+    return c.json(status);
+  });
+
+  app.patch("/api/admin/analysis", async (c) => {
+    const sql = requireSql(deps.sql);
+    const user = requireVerified(c.get("user"));
+    if (user.role !== "admin") {
+      throw new HttpError(403, "forbidden", "Admin role required.");
+    }
+    const input = await parseJson(c, patchAnalysisSettingsRequestSchema);
+    await sql`
+      UPDATE public.analysis_settings
+      SET
+        analysis_enabled = COALESCE(${input.analysisEnabled ?? null}::boolean, analysis_enabled),
+        analysis_paused = COALESCE(${input.analysisPaused ?? null}::boolean, analysis_paused),
+        pause_reason = CASE
+          WHEN ${input.pauseReason !== undefined} THEN ${input.pauseReason ?? null}
+          WHEN ${input.analysisPaused === false} THEN NULL
+          ELSE pause_reason
+        END,
+        daily_cap_cents = COALESCE(${input.dailyCapCents ?? null}::int, daily_cap_cents),
+        monthly_cap_cents = COALESCE(${input.monthlyCapCents ?? null}::int, monthly_cap_cents),
+        updated_at = now()
+      WHERE id = 1
+    `;
+    return c.json(await loadAnalysisStatus(sql, config));
   });
 
   app.post("/api/admin/reviews/:id/decision", async (c) => {
@@ -999,6 +1252,41 @@ export function createApp(deps: {
   return app;
 }
 
+async function loadAnalysisStatus(sql: Sql, config: ApiConfig) {
+  const [settings] = await sql<{
+    analysis_enabled: boolean;
+    analysis_paused: boolean;
+    pause_reason: string | null;
+    daily_cap_cents: number;
+    monthly_cap_cents: number;
+    pipeline_version: string;
+  }[]>`
+    SELECT analysis_enabled, analysis_paused, pause_reason,
+           daily_cap_cents, monthly_cap_cents, pipeline_version
+    FROM public.analysis_settings WHERE id = 1
+  `;
+  const [spend] = await sql<{ daily: number; monthly: number }[]>`
+    SELECT
+      app.analysis_spend_cents(date_trunc('day', now() AT TIME ZONE 'utc')) AS daily,
+      app.analysis_spend_cents(date_trunc('month', now() AT TIME ZONE 'utc')) AS monthly
+  `;
+  const dailyCapCents = settings?.daily_cap_cents ?? 500;
+  const monthlyCapCents = settings?.monthly_cap_cents ?? 10_000;
+  const dailySpendCents = spend?.daily ?? 0;
+  const monthlySpendCents = spend?.monthly ?? 0;
+  return {
+    enabled: settings?.analysis_enabled ?? config.analysisEnabledDefault,
+    paused: settings?.analysis_paused ?? false,
+    pauseReason: settings?.pause_reason ?? null,
+    dailyCapCents,
+    monthlyCapCents,
+    dailySpendCents,
+    monthlySpendCents,
+    dailySpendWarning: spendWarningLevel(dailySpendCents, dailyCapCents),
+    monthlySpendWarning: spendWarningLevel(monthlySpendCents, monthlyCapCents),
+    pipelineVersion: settings?.pipeline_version ?? "m2.v1",
+  };
+}
 async function decideSubmission(
   sql: Sql,
   user: AuthUser,
@@ -1117,6 +1405,7 @@ async function decideSubmission(
       WHERE id = ${submission.id}::uuid
       RETURNING revision, processing_state
     `;
+    await enqueueIssueTransitionOutbox(tx as unknown as Sql, issueId, "issue.published");
     void config;
     return {
       submissionId: submission.id,
@@ -1211,6 +1500,7 @@ async function decideIssue(
       `;
     }
   }
+  await enqueueIssueTransitionOutbox(sql, issue.id, "issue.transitioned");
   return {
     issueId: issue.id,
     issueStatus: updated.status,
@@ -1500,6 +1790,7 @@ function shareHtmlDocument(opts: {
   brandName: string;
   bodyLink: string;
   bodyText: string;
+  imageUrl?: string;
 }): string {
   const title = escapeHtml(opts.title);
   const description = escapeHtml(opts.description);
@@ -1507,6 +1798,11 @@ function shareHtmlDocument(opts: {
   const brandName = escapeHtml(opts.brandName);
   const bodyLink = escapeHtml(opts.bodyLink);
   const bodyText = escapeHtml(opts.bodyText);
+  const imageMeta = opts.imageUrl
+    ? `<meta property="og:image" content="${escapeHtml(opts.imageUrl)}"/>
+<meta name="twitter:card" content="summary_large_image"/>
+<meta name="twitter:image" content="${escapeHtml(opts.imageUrl)}"/>`
+    : `<meta name="twitter:card" content="summary"/>`;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1516,6 +1812,7 @@ function shareHtmlDocument(opts: {
 <meta property="og:title" content="${title}"/>
 <meta property="og:description" content="${description}"/>
 <meta property="og:url" content="${url}"/>
+${imageMeta}
 <meta http-equiv="refresh" content="0;url=${bodyLink}"/>
 <link rel="canonical" href="${bodyLink}"/>
 </head>

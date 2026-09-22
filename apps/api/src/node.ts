@@ -8,6 +8,10 @@ import type { ProfileRole } from "@mamdani-ticketer/contracts";
 import { createApp, type Authenticate } from "./app.js";
 import { configFromEnv } from "./config.js";
 import { FilesystemObjectStore, MemoryObjectStore } from "./object-store.js";
+import {
+  FilesystemArtifactStore,
+  MemoryArtifactStore,
+} from "./lib/artifacts.js";
 
 loadEnvFile(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../.env"));
 
@@ -16,6 +20,9 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../
 const uploadDir = path.isAbsolute(config.uploadDir)
   ? config.uploadDir
   : path.resolve(repoRoot, config.uploadDir);
+const artifactDir = path.isAbsolute(config.artifactDir)
+  ? config.artifactDir
+  : path.resolve(repoRoot, config.artifactDir);
 const databaseUrl = process.env.DATABASE_URL;
 const sql = databaseUrl
   ? postgres(databaseUrl, { max: 4, prepare: false })
@@ -25,6 +32,11 @@ const objectStore =
   config.objectStore === "mock"
     ? new MemoryObjectStore(config.publicUploadBaseUrl)
     : new FilesystemObjectStore(uploadDir, config.publicUploadBaseUrl);
+
+const artifacts =
+  config.objectStore === "mock"
+    ? new MemoryArtifactStore(config.publicApiBaseUrl)
+    : new FilesystemArtifactStore(artifactDir, config.publicApiBaseUrl);
 
 const authenticate: Authenticate = async (authorization, digUser, digRole) => {
   if (config.allowDevAuth && digUser) {
@@ -64,7 +76,7 @@ const authenticate: Authenticate = async (authorization, digUser, digRole) => {
   };
 };
 
-const app = createApp({ sql, authenticate, objectStore, config });
+const app = createApp({ sql, authenticate, objectStore, artifacts, config });
 
 serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(`${config.brandName} API listening on http://localhost:${info.port}`);

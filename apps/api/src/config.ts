@@ -7,13 +7,17 @@ export type ApiConfig = {
   bbox: { minLng: number; maxLng: number; minLat: number; maxLat: number };
   publicUploadBaseUrl: string;
   publicAppUrl: string;
+  publicApiBaseUrl: string;
   uploadDir: string;
+  artifactDir: string;
   objectStore: "filesystem" | "mock";
   allowDevAuth: boolean;
   brandName: string;
   disclaimer: string;
+  /** Default estimate used when deciding whether to enqueue analysis. */
+  analysisEstimateCents: number;
+  analysisEnabledDefault: boolean;
 };
-
 function num(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
   const parsed = Number(value);
@@ -43,11 +47,17 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       /\/$/,
       "",
     ),
+    publicApiBaseUrl: (
+      env.PUBLIC_API_URL ?? `http://localhost:${num(env.API_PORT, 8787)}`
+    ).replace(/\/$/, ""),
     uploadDir: env.UPLOAD_DIR ?? ".uploads",
+    artifactDir: env.ARTIFACT_DIR ?? ".artifacts",
     objectStore: env.OBJECT_STORE === "mock" ? "mock" : "filesystem",
     allowDevAuth: env.ALLOW_DEV_AUTH === "true",
     brandName: env.BRAND_NAME?.trim() || brand.name,
     disclaimer: disclaimerFor(brand),
+    analysisEstimateCents: num(env.ANALYSIS_ESTIMATE_CENTS, 5),
+    analysisEnabledDefault: env.ANALYSIS_ENABLED !== "false",
   };
 }
 

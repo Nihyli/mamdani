@@ -12,7 +12,11 @@
     "dev:web": "npm run dev -w @mamdani-ticketer/web",
     "test:api": "npm run test -w @mamdani-ticketer/api",
     "db:local": "bash db/scripts/local.sh",
-    "db:seed": "bash db/scripts/seed.sh"
+    "db:seed": "bash db/scripts/seed.sh",
+    "worker:media": "bash workers/media/run.sh",
+    "worker:media:once": "bash workers/media/run.sh --once",
+    "outbox:once": "tsx apps/api/src/jobs/outbox-once.ts",
+    "export:encrypted": "bash scripts/encrypted-export.sh"
   },
   "engines": {
     "node": ">=20"

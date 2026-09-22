@@ -9,6 +9,7 @@ import {
 } from "../src/lib/submission-rules.js";
 import { canonicalizeTikTokUrl } from "../src/lib/source-url.js";
 import { createApp } from "../src/app.js";
+import { MemoryArtifactStore } from "../src/lib/artifacts.js";
 import { MemoryObjectStore } from "../src/object-store.js";
 
 const point = { longitude: -73.99, latitude: 40.73 };
@@ -102,6 +103,7 @@ describe("HTTP shell without a database", () => {
           }
         : null,
     objectStore: new MemoryObjectStore("http://localhost:8787/dev-uploads"),
+    artifacts: new MemoryArtifactStore("http://localhost:8787"),
     config: configFromEnv({ CORS_ORIGINS: "http://localhost:5173", OBJECT_STORE: "mock" }),
   });
 
