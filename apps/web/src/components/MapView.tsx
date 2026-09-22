@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import maplibregl, { type GeoJSONSource, type Map } from "maplibre-gl";
 import type { PublicIssueListItem } from "@mamdani-ticketer/contracts";
-import { getMapStyle, NYC_CENTER, NYC_ZOOM } from "../lib/map-style";
+import { resolveMapStyle, NYC_CENTER, NYC_ZOOM } from "../lib/map-style";
 import { isPublicMapStatus } from "../lib/labels";
 
 type Props = {
@@ -35,115 +35,160 @@ export function MapView({
   const pinMarkerRef = useRef<maplibregl.Marker | null>(null);
   const onSelectRef = useRef(onSelect);
   const onPinMoveRef = useRef(onPinMove);
+  const issuesRef = useRef(issues);
+  const selectedIdRef = useRef(selectedId);
   onSelectRef.current = onSelect;
   onPinMoveRef.current = onPinMove;
+  issuesRef.current = issues;
+  selectedIdRef.current = selectedId;
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
+    const container = containerRef.current;
+    let cancelled = false;
+    let map: Map | null = null;
 
-    const map = new maplibregl.Map({
-      container: containerRef.current,
-      style: getMapStyle(),
-      center: NYC_CENTER,
-      zoom: NYC_ZOOM,
-      attributionControl: { compact: true },
-    });
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
-    mapRef.current = map;
+    function applyIssues(target: Map) {
+      const source = target.getSource("issues") as GeoJSONSource | undefined;
+      if (!source) return;
+      const data: GeoJSON.FeatureCollection = {
+        type: "FeatureCollection",
+        features: issuesRef.current
+          .filter((issue) => isPublicMapStatus(issue.status))
+          .map((issue) => ({
+            type: "Feature" as const,
+            id: issue.id,
+            properties: {
+              id: issue.id,
+              status: issue.status,
+              color: statusColor(issue.status),
+              selected: issue.id === selectedIdRef.current,
+            },
+            geometry: {
+              type: "Point" as const,
+              coordinates: [issue.location.longitude, issue.location.latitude],
+            },
+          })),
+      };
+      source.setData(data);
+    }
 
-    map.on("load", () => {
-      map.addSource("issues", {
-        type: "geojson",
-        data: emptyFc(),
-        cluster: true,
-        clusterMaxZoom: 14,
-        clusterRadius: 48,
-      });
+    void resolveMapStyle().then((style) => {
+      if (cancelled || !container || mapRef.current) return;
 
-      map.addLayer({
-        id: "clusters",
-        type: "circle",
-        source: "issues",
-        filter: ["has", "point_count"],
-        paint: {
-          "circle-color": "#255BDB",
-          "circle-radius": ["step", ["get", "point_count"], 16, 10, 20, 30, 26],
-          "circle-opacity": 0.85,
-        },
+      map = new maplibregl.Map({
+        container,
+        style,
+        center: NYC_CENTER,
+        zoom: NYC_ZOOM,
+        attributionControl: { compact: true },
       });
+      map.addControl(
+        new maplibregl.NavigationControl({ showCompass: false }),
+        "top-right",
+      );
+      mapRef.current = map;
 
-      map.addLayer({
-        id: "cluster-count",
-        type: "symbol",
-        source: "issues",
-        filter: ["has", "point_count"],
-        layout: {
-          "text-field": ["get", "point_count_abbreviated"],
-          "text-size": 12,
-        },
-        paint: { "text-color": "#ffffff" },
-      });
+      map.on("load", () => {
+        if (!map) return;
+        map.addSource("issues", {
+          type: "geojson",
+          data: emptyFc(),
+          cluster: true,
+          clusterMaxZoom: 14,
+          clusterRadius: 48,
+        });
 
-      map.addLayer({
-        id: "unclustered",
-        type: "circle",
-        source: "issues",
-        filter: ["!", ["has", "point_count"]],
-        paint: {
-          "circle-color": ["get", "color"],
-          "circle-radius": [
-            "case",
-            ["boolean", ["feature-state", "selected"], false],
-            11,
-            8,
-          ],
-          "circle-stroke-width": 2,
-          "circle-stroke-color": "#F7F5EF",
-        },
-      });
+        map.addLayer({
+          id: "clusters",
+          type: "circle",
+          source: "issues",
+          filter: ["has", "point_count"],
+          paint: {
+            "circle-color": "#255BDB",
+            "circle-radius": ["step", ["get", "point_count"], 16, 10, 20, 30, 26],
+            "circle-opacity": 0.85,
+          },
+        });
 
-      map.on("click", "clusters", (e) => {
-        const features = map.queryRenderedFeatures(e.point, { layers: ["clusters"] });
-        const clusterId = features[0]?.properties?.cluster_id;
-        const source = map.getSource("issues") as GeoJSONSource;
-        if (clusterId == null) return;
-        source
-          .getClusterExpansionZoom(clusterId)
-          .then((zoom) => {
-            const geometry = features[0]?.geometry;
-            if (geometry?.type !== "Point") return;
-            map.easeTo({
-              center: geometry.coordinates as [number, number],
-              zoom,
-            });
-          })
-          .catch(() => undefined);
-      });
+        map.addLayer({
+          id: "cluster-count",
+          type: "symbol",
+          source: "issues",
+          filter: ["has", "point_count"],
+          layout: {
+            "text-field": ["get", "point_count_abbreviated"],
+            "text-size": 12,
+          },
+          paint: { "text-color": "#ffffff" },
+        });
 
-      map.on("click", "unclustered", (e) => {
-        const id = e.features?.[0]?.properties?.id;
-        if (typeof id === "string") onSelectRef.current(id);
-      });
+        map.addLayer({
+          id: "unclustered",
+          type: "circle",
+          source: "issues",
+          filter: ["!", ["has", "point_count"]],
+          paint: {
+            "circle-color": ["get", "color"],
+            "circle-radius": [
+              "case",
+              ["boolean", ["feature-state", "selected"], false],
+              11,
+              8,
+            ],
+            "circle-stroke-width": 2,
+            "circle-stroke-color": "#F7F5EF",
+          },
+        });
 
-      map.on("mouseenter", "clusters", () => {
-        map.getCanvas().style.cursor = "pointer";
-      });
-      map.on("mouseleave", "clusters", () => {
-        map.getCanvas().style.cursor = "";
-      });
-      map.on("mouseenter", "unclustered", () => {
-        map.getCanvas().style.cursor = "pointer";
-      });
-      map.on("mouseleave", "unclustered", () => {
-        map.getCanvas().style.cursor = "";
+        map.on("click", "clusters", (e) => {
+          const features = map!.queryRenderedFeatures(e.point, {
+            layers: ["clusters"],
+          });
+          const clusterId = features[0]?.properties?.cluster_id;
+          const source = map!.getSource("issues") as GeoJSONSource;
+          if (clusterId == null) return;
+          source
+            .getClusterExpansionZoom(clusterId)
+            .then((zoom) => {
+              const geometry = features[0]?.geometry;
+              if (geometry?.type !== "Point") return;
+              map!.easeTo({
+                center: geometry.coordinates as [number, number],
+                zoom,
+              });
+            })
+            .catch(() => undefined);
+        });
+
+        map.on("click", "unclustered", (e) => {
+          const id = e.features?.[0]?.properties?.id;
+          if (typeof id === "string") onSelectRef.current(id);
+        });
+
+        map.on("mouseenter", "clusters", () => {
+          map!.getCanvas().style.cursor = "pointer";
+        });
+        map.on("mouseleave", "clusters", () => {
+          map!.getCanvas().style.cursor = "";
+        });
+        map.on("mouseenter", "unclustered", () => {
+          map!.getCanvas().style.cursor = "pointer";
+        });
+        map.on("mouseleave", "unclustered", () => {
+          map!.getCanvas().style.cursor = "";
+        });
+
+        applyIssues(map);
       });
     });
 
     return () => {
+      cancelled = true;
       pinMarkerRef.current?.remove();
       pinMarkerRef.current = null;
-      map.remove();
-      mapRef.current = null;
+      map?.remove();
+      if (mapRef.current === map) mapRef.current = null;
     };
   }, []);
 

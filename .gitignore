@@ -9,3 +9,5 @@ dist/
 .pgdata/
 .pgsocket/
 .tmp/
+# Large local Protomaps extracts (see apps/web/public/basemap/README.md)
+*.pmtiles
