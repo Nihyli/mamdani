@@ -23,6 +23,7 @@ import {
 } from "../lib/labels";
 import { ErrorState, LoadingState, Page } from "../components/Layout";
 import { StatusBadge } from "../components/StatusBadge";
+import { MapView } from "../components/MapView";
 
 function setMetaProperty(property: string, content: string) {
   let el = document.querySelector(`meta[property="${property}"]`);
@@ -67,6 +68,7 @@ export function ReportPage() {
   const [fixFile, setFixFile] = useState<File | null>(null);
   const [observedAt, setObservedAt] = useState("");
   const [fixNote, setFixNote] = useState("");
+  const [sameLocation, setSameLocation] = useState(true);
   const [rightsAttested, setRightsAttested] = useState(false);
   const [fixBusy, setFixBusy] = useState(false);
   const [fixError, setFixError] = useState<string | null>(null);
@@ -193,6 +195,10 @@ export function ReportPage() {
       setFixError("Add the date you saw the repair.");
       return;
     }
+    if (!sameLocation) {
+      setFixError("Confirm this update is for the same location.");
+      return;
+    }
     if (!rightsAttested) {
       setFixError("Confirm you have the rights to submit this evidence.");
       return;
@@ -274,7 +280,7 @@ export function ReportPage() {
       <Page>
         <ErrorState message={error ?? "Report not found."} onRetry={() => void load()} />
         <Link to="/" className="mt-4 inline-flex min-h-11 items-center text-cobalt">
-          Back to map
+          ← Back to map
         </Link>
       </Page>
     );
@@ -284,166 +290,70 @@ export function ReportPage() {
   const primaryEvidence = issue.evidence.find((e) => e.kind === "image") ?? issue.evidence[0];
   const tiktok = issue.sources.find((s) => s.platform.toLowerCase().includes("tiktok"));
   const canReportFix = status === "open" || status === "fix_pending";
+  const locationLabel = `${BOROUGH_LABELS[issue.borough]}`;
 
-  return (
-    <Page narrow>
-      <p className="mb-2 text-sm text-muted">
-        {CATEGORY_LABELS[issue.category]} · {BOROUGH_LABELS[issue.borough]} ·{" "}
-        {formatAge(issue.createdAt)}
-      </p>
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <StatusBadge status={status} />
-        {issue.daysToVerifiedFix != null ? (
-          <span className="text-sm text-muted">
-            {daysToVerifiedFixLabel(issue.daysToVerifiedFix)}
-          </span>
-        ) : null}
-      </div>
-      <h1 className="mb-4 text-2xl font-semibold tracking-tight">{issue.title}</h1>
-      {issue.description ? (
-        <p className="mb-4 whitespace-pre-wrap text-ink">{issue.description}</p>
-      ) : null}
+  if (showFixForm) {
+    return (
+      <Page narrow>
+        <Link
+          to={issue.path}
+          onClick={(e) => {
+            e.preventDefault();
+            setShowFixForm(false);
+          }}
+          className="mb-4 inline-flex min-h-10 items-center text-sm font-semibold text-cobalt"
+        >
+          ← Back to issue
+        </Link>
+        <h1 className="font-display text-3xl font-bold tracking-tight">Report a fix</h1>
+        <p className="mt-2 text-muted">
+          Share an update if this issue has been fixed or improved.
+        </p>
 
-      {primaryEvidence ? (
-        <div className="mb-4 overflow-hidden rounded-md border border-border bg-white">
-          {primaryEvidence.kind === "video" ? (
-            <video
-              src={primaryEvidence.url}
-              controls
-              className="max-h-[420px] w-full bg-ink"
-            />
-          ) : (
+        <div className="mt-5 flex gap-3 rounded-xl border border-border bg-surface p-3 mock-card-shadow">
+          {primaryEvidence?.kind === "image" ? (
             <img
               src={primaryEvidence.url}
-              alt={primaryEvidence.summary || `Evidence for ${issue.title}`}
-              className="max-h-[420px] w-full object-contain"
+              alt=""
+              className="h-14 w-14 rounded-[8px] object-cover"
             />
-          )}
-        </div>
-      ) : (
-        <p className="mb-4 text-muted">No public evidence image yet.</p>
-      )}
-
-      {tiktok ? (
-        <div className="mb-4 rounded-md border border-border bg-white p-3">
-          <p className="mb-2 text-sm font-medium">Source</p>
-          {embedSource === tiktok.url ? (
-            <div className="space-y-2">
-              <p className="text-sm text-muted">
-                TikTok may receive your IP address and browser information.
-              </p>
-              <a
-                href={tiktok.url}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex min-h-11 items-center font-medium text-cobalt underline-offset-2 hover:underline"
-              >
-                Open on TikTok
-              </a>
-            </div>
           ) : (
-            <button
-              type="button"
-              className="inline-flex min-h-11 items-center rounded-md border border-border px-4 font-medium"
-              onClick={() => setEmbedSource(tiktok.url)}
-            >
-              Load TikTok video
-            </button>
+            <div className="flex h-14 w-14 items-center justify-center rounded-[8px] bg-panel text-[10px] text-muted">
+              Issue
+            </div>
           )}
-        </div>
-      ) : null}
-
-      <div className="mb-4 flex flex-wrap gap-2">
-        <Link
-          to={`/?report=${issue.id}`}
-          className="inline-flex min-h-11 items-center rounded-md border border-border bg-white px-4 font-medium"
-        >
-          View on map
-        </Link>
-        <button
-          type="button"
-          onClick={() => void share()}
-          className="inline-flex min-h-11 items-center rounded-md bg-cobalt px-4 font-semibold text-white"
-        >
-          {copied ? "Link copied" : "Share / copy link"}
-        </button>
-        <button
-          type="button"
-          disabled={supportBusy}
-          onClick={() => void toggleSupport()}
-          className="inline-flex min-h-11 items-center rounded-md border border-border bg-white px-4 font-medium disabled:opacity-40"
-          aria-pressed={supported}
-        >
-          {supported ? "Supporting" : "Support"} · {supportCount}
-        </button>
-        {canReportFix ? (
-          <button
-            type="button"
-            onClick={() => {
-              if (!auth.userId) {
-                navigate(`/sign-in?next=${encodeURIComponent(issue.path)}`);
-                return;
-              }
-              setShowFixForm((v) => !v);
-              setFixError(null);
-              setFixSuccess(null);
-            }}
-            className="inline-flex min-h-11 items-center rounded-md border border-border bg-white px-4 font-medium"
-          >
-            Report a fix
-          </button>
-        ) : null}
-      </div>
-
-      {supportError ? (
-        <p role="alert" className="mb-4 text-sm text-open">
-          {supportError}
-        </p>
-      ) : null}
-      {fixSuccess ? (
-        <p role="status" className="mb-4 text-sm text-fixed">
-          {fixSuccess}
-        </p>
-      ) : null}
-
-      {showFixForm ? (
-        <form
-          onSubmit={(e) => void submitFix(e)}
-          className="mb-6 space-y-4 rounded-md border border-border bg-white p-4"
-        >
-          <h2 className="text-lg font-semibold">Report a fix</h2>
-          <p className="text-sm text-muted">
-            Upload recent evidence that this issue looks repaired. A moderator
-            verifies before the status changes to verified fixed.
-          </p>
-
-          <div>
-            <label htmlFor="observed-at" className="mb-2 block font-medium">
-              Date you saw the repair
-            </label>
-            <input
-              id="observed-at"
-              type="date"
-              required
-              value={observedAt}
-              onChange={(e) => setObservedAt(e.target.value)}
-              className="min-h-11 w-full rounded-md border border-border px-3"
-            />
+          <div className="min-w-0 flex-1">
+            <div className="mb-1 flex flex-wrap items-center gap-2">
+              <p className="truncate font-bold">{issue.title}</p>
+              <StatusBadge status={status} />
+            </div>
+            <p className="text-sm text-muted">{locationLabel}</p>
           </div>
+        </div>
 
+        <form onSubmit={(e) => void submitFix(e)} className="mt-5 space-y-4">
           <div>
-            <label htmlFor="fix-photo" className="mb-2 block font-medium">
-              Photo or video (optional)
+            <label htmlFor="fix-photo" className="mb-2 block text-sm font-semibold">
+              Add a recent photo or video
             </label>
-            <input
-              id="fix-photo"
-              type="file"
-              accept="image/jpeg,image/png,image/webp,video/mp4"
-              onChange={(e) => onFixFileChange(e.target.files?.[0] ?? null)}
-              className="block w-full text-sm"
-            />
+            <label
+              htmlFor="fix-photo"
+              className="flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-border-strong bg-panel px-4 py-6 text-center"
+            >
+              <span className="text-sm font-medium text-cobalt">click to upload</span>
+              <span className="mt-1 text-xs text-muted">
+                Photos or videos help us verify the fix. Max 50 MB video / 10 MB photo.
+              </span>
+              <input
+                id="fix-photo"
+                type="file"
+                accept="image/jpeg,image/png,image/webp,video/mp4"
+                onChange={(e) => onFixFileChange(e.target.files?.[0] ?? null)}
+                className="sr-only"
+              />
+            </label>
             {fixFile ? (
-              <p className="mt-1 text-sm text-muted">{fixFile.name}</p>
+              <p className="mt-2 text-sm text-muted">{fixFile.name}</p>
             ) : null}
             {uploadProgress != null ? (
               <p className="mt-1 text-sm text-muted">
@@ -453,30 +363,68 @@ export function ReportPage() {
           </div>
 
           <div>
-            <label htmlFor="fix-note" className="mb-2 block font-medium">
-              Note (optional)
+            <label htmlFor="observed-at" className="mb-2 block text-sm font-semibold">
+              Date observed *
+            </label>
+            <input
+              id="observed-at"
+              type="date"
+              required
+              value={observedAt}
+              onChange={(e) => setObservedAt(e.target.value)}
+              className="min-h-11 w-full rounded-[8px] border border-border px-3"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="fix-note" className="mb-2 block text-sm font-semibold">
+              Add a short note (optional)
             </label>
             <textarea
               id="fix-note"
               value={fixNote}
-              onChange={(e) => setFixNote(e.target.value)}
+              onChange={(e) => setFixNote(e.target.value.slice(0, 280))}
               rows={3}
-              className="w-full rounded-md border border-border px-3 py-2"
+              maxLength={280}
+              placeholder="e.g. The pothole has been filled and the street looks much better now."
+              className="w-full rounded-[8px] border border-border px-3 py-2"
             />
+            <p className="mt-1 text-right text-xs text-muted">{fixNote.length}/280</p>
           </div>
 
           <label className="flex min-h-11 cursor-pointer items-start gap-3">
             <input
               type="checkbox"
-              className="mt-1 h-5 w-5"
+              className="mt-1 h-5 w-5 accent-cobalt"
+              checked={sameLocation}
+              onChange={(e) => setSameLocation(e.target.checked)}
+            />
+            <span className="text-sm">
+              Confirm this is the same location ({locationLabel})
+            </span>
+          </label>
+
+          <label className="flex min-h-11 cursor-pointer items-start gap-3">
+            <input
+              type="checkbox"
+              className="mt-1 h-5 w-5 accent-cobalt"
               checked={rightsAttested}
               onChange={(e) => setRightsAttested(e.target.checked)}
             />
             <span className="text-sm">
-              I have the rights to share this evidence and it shows a recent
-              repair at this location.
+              I have the rights to share this evidence and it shows a recent repair.
             </span>
           </label>
+
+          <div className="flex gap-3 rounded-xl border border-cobalt/20 bg-cobalt/5 px-4 py-3 text-sm text-ink">
+            <span className="font-bold text-cobalt" aria-hidden="true">
+              i
+            </span>
+            <p>
+              Your update will be reviewed before this report is marked fixed. We may
+              reach out if we need more information.
+            </p>
+          </div>
 
           {fixError ? (
             <p role="alert" className="text-sm text-open">
@@ -484,28 +432,247 @@ export function ReportPage() {
             </p>
           ) : null}
 
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="submit"
-              disabled={fixBusy || !rightsAttested || !observedAt}
-              className="inline-flex min-h-11 items-center rounded-md bg-cobalt px-4 font-semibold text-white disabled:opacity-40"
-            >
-              {fixBusy ? "Submitting…" : "Submit fix evidence"}
-            </button>
+          <button
+            type="submit"
+            disabled={fixBusy || !rightsAttested || !observedAt || !sameLocation}
+            className="inline-flex min-h-12 w-full items-center justify-center rounded-[8px] bg-cobalt px-4 font-semibold text-white hover:bg-[#1d4ed8] disabled:opacity-40"
+          >
+            {fixBusy ? "Submitting…" : "Submit for review"}
+          </button>
+        </form>
+      </Page>
+    );
+  }
+
+  return (
+    <Page>
+      <Link to="/" className="mb-4 inline-flex min-h-10 items-center text-sm font-semibold text-cobalt">
+        ← Back to map
+      </Link>
+
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="mb-2 flex flex-wrap items-center gap-2 md:hidden">
+            <h1 className="font-display text-2xl font-bold leading-tight tracking-tight">
+              {issue.title}
+            </h1>
+            <StatusBadge status={status} />
+          </div>
+          <h1 className="hidden font-display text-3xl font-bold leading-tight tracking-tight md:block md:text-4xl">
+            {issue.title}
+          </h1>
+          <p className="mt-2 flex flex-wrap items-center gap-x-2 text-sm text-muted">
+            <span aria-hidden="true">📍</span>
+            <span className="font-semibold text-ink">{BOROUGH_LABELS[issue.borough]}</span>
+            <span>· {CATEGORY_LABELS[issue.category]}</span>
+          </p>
+        </div>
+        <div className="hidden shrink-0 text-right md:block">
+          <StatusBadge status={status} />
+          <p className="mt-2 text-xs text-muted">
+            Reported {formatAge(issue.createdAt)}
+            {issue.shortId ? ` · #${issue.shortId}` : ""}
+          </p>
+          {issue.daysToVerifiedFix != null ? (
+            <p className="mt-1 text-xs font-semibold text-fixed">
+              {daysToVerifiedFixLabel(issue.daysToVerifiedFix)}
+            </p>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
+        <div className="min-w-0 space-y-4">
+          {primaryEvidence ? (
+            <div className="relative overflow-hidden rounded-xl border border-border bg-white mock-card-shadow">
+              {primaryEvidence.kind === "video" ? (
+                <video
+                  src={primaryEvidence.url}
+                  controls
+                  className="max-h-[460px] w-full bg-ink"
+                />
+              ) : (
+                <img
+                  src={primaryEvidence.url}
+                  alt={primaryEvidence.summary || `Evidence for ${issue.title}`}
+                  className="max-h-[460px] w-full object-contain"
+                />
+              )}
+              {tiktok ? (
+                <div className="absolute bottom-3 left-3">
+                  {embedSource === tiktok.url ? (
+                    <a
+                      href={tiktok.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex min-h-9 items-center rounded-full bg-ink/85 px-3 text-xs font-semibold text-white"
+                    >
+                      Open on TikTok ↗
+                    </a>
+                  ) : (
+                    <button
+                      type="button"
+                      className="inline-flex min-h-9 items-center rounded-full bg-ink/85 px-3 text-xs font-semibold text-white"
+                      onClick={() => setEmbedSource(tiktok.url)}
+                    >
+                      View original TikTok ↗
+                    </button>
+                  )}
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <p className="rounded-xl border border-dashed border-border-strong bg-panel px-4 py-8 text-center text-muted">
+              No public evidence image yet.
+            </p>
+          )}
+
+          {issue.description ? (
+            <section className="rounded-xl border border-border bg-surface p-4 mock-card-shadow">
+              <h2 className="mb-2 text-sm font-bold">Why this location?</h2>
+              <p className="whitespace-pre-wrap text-sm text-ink">{issue.description}</p>
+              {tiktok ? (
+                <p className="mt-3 text-sm">
+                  <span className="text-muted">Source: </span>
+                  <a
+                    href={tiktok.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-semibold text-cobalt underline-offset-2 hover:underline"
+                  >
+                    TikTok video ↗
+                  </a>
+                </p>
+              ) : null}
+            </section>
+          ) : null}
+
+          {supportError ? (
+            <p role="alert" className="text-sm text-open">
+              {supportError}
+            </p>
+          ) : null}
+          {fixSuccess ? (
+            <p role="status" className="text-sm text-fixed">
+              {fixSuccess}
+            </p>
+          ) : null}
+
+          {canReportFix ? (
             <button
               type="button"
-              onClick={() => setShowFixForm(false)}
-              className="inline-flex min-h-11 items-center rounded-md border border-border px-4 font-medium"
+              onClick={() => {
+                if (!auth.userId) {
+                  navigate(`/sign-in?next=${encodeURIComponent(issue.path)}`);
+                  return;
+                }
+                setShowFixForm(true);
+                setFixError(null);
+                setFixSuccess(null);
+              }}
+              className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-[8px] bg-cobalt px-4 font-semibold text-white hover:bg-[#1d4ed8]"
             >
-              Cancel
+              🔧 Report a fix
+            </button>
+          ) : null}
+
+          <p className="text-sm text-muted">
+            Publishing on {brand.shortName} does not submit a request to NYC 311.
+          </p>
+        </div>
+
+        <aside className="space-y-4">
+          <div className="overflow-hidden rounded-xl border border-border bg-surface mock-card-shadow">
+            <div className="h-44">
+              <MapView
+                issues={[]}
+                onSelect={() => undefined}
+                interactivePin={{
+                  longitude: issue.location.longitude,
+                  latitude: issue.location.latitude,
+                }}
+                className="h-full w-full"
+              />
+            </div>
+            <p className="border-t border-border px-3 py-3 text-sm text-ink">
+              <span aria-hidden="true">📍 </span>
+              {BOROUGH_LABELS[issue.borough]}
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-border bg-surface p-4 text-center mock-card-shadow">
+            <p className="text-3xl" aria-hidden="true">
+              ♥
+            </p>
+            <p className="mt-1 text-2xl font-bold">{supportCount}</p>
+            <p className="mt-1 text-sm text-muted">
+              Neighbors agree this needs attention.
+            </p>
+            <button
+              type="button"
+              disabled={supportBusy}
+              onClick={() => void toggleSupport()}
+              className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-[8px] border border-cobalt/30 bg-cobalt/5 px-4 font-semibold text-cobalt disabled:opacity-40"
+              aria-pressed={supported}
+            >
+              {supported ? "Supporting" : "♡ Add your support"}
             </button>
           </div>
-        </form>
-      ) : null}
 
-      <p className="mt-6 text-sm text-muted">
-        Publishing on {brand.shortName} does not submit a request to NYC 311.
-      </p>
+          <div className="rounded-xl border border-border bg-surface p-4 mock-card-shadow">
+            <p className="mb-3 text-sm font-bold">Share</p>
+            <div className="grid grid-cols-4 gap-2 text-center text-xs text-muted">
+              <button
+                type="button"
+                onClick={() => void share()}
+                className="flex flex-col items-center gap-1"
+              >
+                <span className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-panel text-ink">
+                  ↗
+                </span>
+                {copied ? "Copied" : "Copy"}
+              </button>
+              <a
+                href={`https://twitter.com/intent/tweet?url=${encodeURIComponent(`${window.location.origin}${issue.path}`)}&text=${encodeURIComponent(issue.title)}`}
+                target="_blank"
+                rel="noreferrer"
+                className="flex flex-col items-center gap-1"
+              >
+                <span className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-panel text-ink">
+                  𝕏
+                </span>
+                X
+              </a>
+              <a
+                href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(`${window.location.origin}${issue.path}`)}`}
+                target="_blank"
+                rel="noreferrer"
+                className="flex flex-col items-center gap-1"
+              >
+                <span className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-panel text-ink">
+                  f
+                </span>
+                Facebook
+              </a>
+              <a
+                href={`mailto:?subject=${encodeURIComponent(issue.title)}&body=${encodeURIComponent(`${window.location.origin}${issue.path}`)}`}
+                className="flex flex-col items-center gap-1"
+              >
+                <span className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-panel text-ink">
+                  ✉
+                </span>
+                Email
+              </a>
+            </div>
+            <Link
+              to={`/report-content?url=${encodeURIComponent(`${window.location.origin}${issue.path}`)}`}
+              className="mt-3 inline-flex text-xs font-semibold text-muted underline-offset-2 hover:underline"
+            >
+              Report content
+            </Link>
+          </div>
+        </aside>
+      </div>
     </Page>
   );
 }

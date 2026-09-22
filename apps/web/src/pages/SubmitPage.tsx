@@ -31,6 +31,12 @@ const ALLOWED = new Set([
   "video/mp4",
 ]);
 
+const STEP_META = [
+  { n: 1 as const, label: "Source" },
+  { n: 2 as const, label: "Location" },
+  { n: 3 as const, label: "Review" },
+];
+
 export function SubmitPage() {
   const auth = useAuth();
   const navigate = useNavigate();
@@ -49,6 +55,7 @@ export function SubmitPage() {
   const [rightsAttested, setRightsAttested] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -123,9 +130,9 @@ export function SubmitPage() {
     setFile(next);
   }
 
-  const canStep1 = Boolean(file);
+  const canStep1 = Boolean(file || sourceUrl.trim());
   const canStep2 = Boolean(locationText.trim() && pin);
-  const canStep3 = rightsAttested && !submitting;
+  const canStep3 = rightsAttested && !submitting && Boolean(file && pin);
 
   const reviewLines = useMemo(
     () => [
@@ -134,17 +141,11 @@ export function SubmitPage() {
       { label: "Title", value: title.trim() || "(generated at review)" },
       { label: "Location", value: locationText.trim() || "—" },
       {
-        label: "Pin",
-        value: pin
-          ? `${pin.latitude.toFixed(5)}, ${pin.longitude.toFixed(5)}`
-          : "—",
-      },
-      {
         label: "Where did you see this?",
         value: sourceUrl.trim() || "Not provided",
       },
     ],
-    [file, category, title, locationText, pin, sourceUrl],
+    [file, category, title, locationText, sourceUrl],
   );
 
   async function submit() {
@@ -199,6 +200,7 @@ export function SubmitPage() {
         auth.authHeaders,
       );
 
+      setSubmitted(true);
       navigate(`/my-reports/${result.id}`, {
         state: { processingState: result.processingState },
       });
@@ -246,7 +248,7 @@ export function SubmitPage() {
         </p>
         <Link
           to="/sign-in?next=/submit"
-          className="inline-flex min-h-11 items-center rounded-md bg-cobalt px-4 font-semibold text-white"
+          className="inline-flex min-h-11 items-center rounded-[8px] bg-cobalt px-4 font-semibold text-white"
         >
           Sign in to continue
         </Link>
@@ -254,60 +256,94 @@ export function SubmitPage() {
     );
   }
 
+  const titles =
+    step === 1
+      ? {
+          title: "Put it on the map",
+          subtitle: "Share a link or upload a photo or video of the issue you want to report.",
+        }
+      : step === 2
+        ? {
+            title: "Review the location",
+            subtitle: "Drag the pin to the correct spot. Location needs your confirmation.",
+          }
+        : {
+            title: "Ready for review",
+            subtitle: submitted
+              ? "Your report has been submitted and is in the queue for moderator review."
+              : "Confirm the details, then submit for moderator review.",
+          };
+
   return (
-    <Page title="Add a report" narrow>
-      <ol className="mb-6 flex gap-2 text-sm" aria-label="Submission steps">
-        {([1, 2, 3] as const).map((n) => (
-          <li
-            key={n}
-            className={`rounded-md px-3 py-2 font-medium ${
-              step === n ? "bg-cobalt text-white" : "bg-border/50 text-muted"
-            }`}
-          >
-            {n === 1 ? "Media" : n === 2 ? "Location" : "Review"}
-          </li>
-        ))}
-      </ol>
+    <Page narrow>
+      <Stepper step={step} />
+
+      <h1 className="mt-6 text-2xl font-bold tracking-tight sm:text-3xl">{titles.title}</h1>
+      <p className="mt-2 text-muted">{titles.subtitle}</p>
 
       {formError ? (
-        <div role="alert" className="mb-4 rounded-md border border-open/40 bg-open/10 px-3 py-3 text-sm">
+        <div role="alert" className="mt-4 rounded-xl border border-open/40 bg-open/10 px-3 py-3 text-sm">
           {formError}
         </div>
       ) : null}
 
       {step === 1 ? (
-        <section className="space-y-4">
-          <div>
-            <label htmlFor="media" className="mb-2 block font-medium">
-              Photo or video (required)
+        <section className="mt-5 space-y-4">
+          <div className="rounded-xl border border-border bg-surface p-4 mock-card-shadow">
+            <label htmlFor="source" className="mb-2 block text-sm font-semibold">
+              Paste a TikTok link
             </label>
             <input
-              id="media"
-              type="file"
-              accept="image/jpeg,image/png,image/webp,video/mp4"
-              className="block w-full min-h-11 text-sm"
-              onChange={(e) => onFileChange(e.target.files?.[0] ?? null)}
+              id="source"
+              type="url"
+              value={sourceUrl}
+              onChange={(e) => setSourceUrl(e.target.value)}
+              className="min-h-11 w-full rounded-[8px] border border-border bg-surface px-3"
+              placeholder="https://www.tiktok.com/…"
             />
-            <p className="mt-2 text-sm text-muted">
-              Up to 10 MB photo or 50 MB / 60 s MP4. This is the evidence — a
-              TikTok link alone is not enough.
+            <p className="mt-1 text-xs text-muted">
+              Optional attribution — we do not download TikTok media.
             </p>
-          </div>
-          {previewUrl && file ? (
-            file.type.startsWith("video/") ? (
-              <video src={previewUrl} controls className="max-h-64 w-full rounded-md bg-ink" />
-            ) : (
-              <img src={previewUrl} alt="Selected upload preview" className="max-h-64 rounded-md object-contain" />
-            )
-          ) : null}
 
-          <div>
-            <label htmlFor="category" className="mb-2 block font-medium">
+            <div className="my-4 flex items-center gap-3 text-xs font-semibold uppercase tracking-wide text-muted">
+              <span className="h-px flex-1 bg-border" />
+              or
+              <span className="h-px flex-1 bg-border" />
+            </div>
+
+            <label
+              htmlFor="media"
+              className="flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-border-strong bg-panel px-4 py-6 text-center"
+            >
+              <p className="font-semibold">Upload a photo or video</p>
+              <p className="mt-1 text-xs text-muted">JPG, PNG, MP4 · up to 50 MB video / 10 MB photo</p>
+              <span className="mt-3 inline-flex min-h-10 items-center rounded-[8px] border border-border bg-surface px-4 text-sm font-semibold">
+                Choose files
+              </span>
+              <input
+                id="media"
+                type="file"
+                accept="image/jpeg,image/png,image/webp,video/mp4"
+                className="sr-only"
+                onChange={(e) => onFileChange(e.target.files?.[0] ?? null)}
+              />
+            </label>
+            {previewUrl && file ? (
+              file.type.startsWith("video/") ? (
+                <video src={previewUrl} controls className="mt-3 max-h-56 w-full rounded-xl border border-border bg-ink" />
+              ) : (
+                <img src={previewUrl} alt="Selected upload preview" className="mt-3 max-h-56 rounded-xl border border-border object-contain" />
+              )
+            ) : null}
+          </div>
+
+          <div className="rounded-xl border border-border bg-surface p-4 mock-card-shadow">
+            <label htmlFor="category" className="mb-2 block text-sm font-semibold">
               Category
             </label>
             <select
               id="category"
-              className="min-h-11 w-full rounded-md border border-border bg-white px-3"
+              className="min-h-11 w-full rounded-[8px] border border-border bg-surface px-3"
               value={category}
               onChange={(e) => {
                 const parsed = issueCategorySchema.safeParse(e.target.value);
@@ -320,10 +356,7 @@ export function SubmitPage() {
                 </option>
               ))}
             </select>
-          </div>
-
-          <div>
-            <label htmlFor="title" className="mb-2 block font-medium">
+            <label htmlFor="title" className="mb-2 mt-4 block text-sm font-semibold">
               Short title (optional)
             </label>
             <input
@@ -331,42 +364,95 @@ export function SubmitPage() {
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               maxLength={160}
-              className="min-h-11 w-full rounded-md border border-border bg-white px-3"
+              className="min-h-11 w-full rounded-[8px] border border-border bg-surface px-3"
               placeholder="e.g. Deep pothole on Broadway"
+            />
+            <label htmlFor="intersection" className="mb-2 mt-4 block text-sm font-semibold">
+              Optional: Intersection (helps us find it faster)
+            </label>
+            <input
+              id="intersection"
+              value={locationText}
+              onChange={(e) => onLocationInput(e.target.value)}
+              className="min-h-11 w-full rounded-[8px] border border-border bg-surface px-3"
+              placeholder="e.g. Atlantic Ave & Flatbush Ave"
+              autoComplete="off"
             />
           </div>
 
+          <label className="flex min-h-11 cursor-pointer items-start gap-3 text-sm">
+            <input
+              type="checkbox"
+              className="mt-1 h-5 w-5 accent-cobalt"
+              checked={rightsAttested}
+              onChange={(e) => setRightsAttested(e.target.checked)}
+            />
+            <span>
+              I confirm I have the right to share this content and it does not violate
+              others&apos; privacy.{" "}
+              <Link to="/terms" className="font-semibold text-cobalt underline-offset-2 hover:underline">
+                Learn more
+              </Link>
+            </span>
+          </label>
+
           <button
             type="button"
-            disabled={!canStep1}
+            disabled={!canStep1 || !file}
             onClick={() => setStep(2)}
-            className="inline-flex min-h-11 items-center rounded-md bg-cobalt px-4 font-semibold text-white disabled:opacity-40"
+            className="inline-flex min-h-12 w-full items-center justify-center rounded-[8px] bg-cobalt px-4 font-semibold text-white hover:bg-[#1d4ed8] disabled:opacity-40"
           >
-            Continue to location
+            Continue →
           </button>
+          {!file ? (
+            <p className="text-center text-xs text-muted">
+              A photo or video upload is required to continue.
+            </p>
+          ) : null}
         </section>
       ) : null}
 
       {step === 2 ? (
-        <section className="space-y-4">
+        <section className="mt-5 space-y-4">
+          <div className="relative h-72 overflow-hidden rounded-xl border border-border mock-card-shadow">
+            <MapView
+              issues={[]}
+              onSelect={() => undefined}
+              interactivePin={
+                pin ?? {
+                  longitude: NYC_CENTER[0],
+                  latitude: NYC_CENTER[1],
+                }
+              }
+              onPinMove={(longitude, latitude) => {
+                setPin({ longitude, latitude });
+                if (!locationText.trim()) {
+                  setLocationText(
+                    `Pin ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`,
+                  );
+                }
+              }}
+            />
+            <div className="pointer-events-none absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-[8px] border border-ink bg-surface px-3 py-1.5 text-xs font-semibold shadow-sm">
+              Drag to adjust location
+            </div>
+          </div>
+
           <div>
-            <label htmlFor="location" className="mb-2 block font-medium">
-              Intersection or address (required)
+            <label htmlFor="location" className="mb-2 block text-sm font-semibold">
+              Intersection or address
             </label>
             <input
               id="location"
               value={locationText}
               onChange={(e) => onLocationInput(e.target.value)}
-              className="min-h-11 w-full rounded-md border border-border bg-white px-3"
+              className="min-h-11 w-full rounded-[8px] border border-border bg-surface px-3"
               placeholder="120 Broadway, Manhattan"
               autoComplete="off"
             />
-            <p className="mt-1 text-xs text-muted">
-              Address suggestions from NYC Dept. of City Planning (GeoSearch).
-            </p>
             {geoError ? <p className="mt-1 text-sm text-open">{geoError}</p> : null}
             {suggestions.length > 0 ? (
-              <ul className="mt-2 overflow-hidden rounded-md border border-border bg-white">
+              <ul className="mt-2 overflow-hidden rounded-xl border border-border bg-surface shadow-sm">
                 {suggestions.map((item) => (
                   <li key={`${item.label}-${item.longitude}-${item.latitude}`}>
                     <button
@@ -382,135 +468,121 @@ export function SubmitPage() {
             ) : null}
           </div>
 
-          <div>
-            <p className="mb-2 font-medium">Confirm the pin</p>
-            <p className="mb-2 text-sm text-muted">
-              Tap the map or drag the pin. Device location is only a convenience —
-              you confirm the pin.
-            </p>
-            <div className="h-64 overflow-hidden rounded-md border border-border">
-              <MapView
-                issues={[]}
-                onSelect={() => undefined}
-                interactivePin={
-                  pin ?? {
-                    longitude: NYC_CENTER[0],
-                    latitude: NYC_CENTER[1],
-                  }
-                }
-                onPinMove={(longitude, latitude) => {
-                  setPin({ longitude, latitude });
-                  if (!locationText.trim()) {
-                    setLocationText(
-                      `Pin ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`,
-                    );
-                  }
-                }}
-              />
+          {previewUrl ? (
+            <div>
+              <p className="mb-2 text-sm font-bold">Evidence from your upload</p>
+              <div className="overflow-hidden rounded-xl border border-border bg-surface">
+                {file?.type.startsWith("video/") ? (
+                  <video src={previewUrl} className="h-24 w-full object-cover" muted />
+                ) : (
+                  <img src={previewUrl} alt="" className="h-24 w-full object-cover" />
+                )}
+              </div>
             </div>
-            <button
-              type="button"
-              className="mt-2 inline-flex min-h-11 items-center text-sm font-medium text-cobalt"
-              onClick={() => {
-                if (!navigator.geolocation) {
-                  setFormError("Geolocation is not available in this browser.");
-                  return;
-                }
-                navigator.geolocation.getCurrentPosition(
-                  (pos) => {
-                    setPin({
-                      longitude: pos.coords.longitude,
-                      latitude: pos.coords.latitude,
-                    });
-                  },
-                  () => setFormError("Could not read your location."),
-                  { enableHighAccuracy: true, timeout: 10_000 },
-                );
-              }}
-            >
-              Use my location to center
-            </button>
-          </div>
+          ) : null}
 
-          <div>
-            <label htmlFor="source" className="mb-2 block font-medium">
-              Where did you see this? (optional)
-            </label>
-            <input
-              id="source"
-              type="url"
-              value={sourceUrl}
-              onChange={(e) => setSourceUrl(e.target.value)}
-              className="min-h-11 w-full rounded-md border border-border bg-white px-3"
-              placeholder="https://www.tiktok.com/…"
-            />
-            <p className="mt-1 text-sm text-muted">
-              Attribution and duplicate check only — we do not download TikTok
-              media.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => setStep(1)}
-              className="inline-flex min-h-11 items-center rounded-md border border-border px-4 font-medium"
-            >
-              Back
-            </button>
-            <button
-              type="button"
-              disabled={!canStep2}
-              onClick={() => setStep(3)}
-              className="inline-flex min-h-11 items-center rounded-md bg-cobalt px-4 font-semibold text-white disabled:opacity-40"
-            >
-              Continue to review
-            </button>
-          </div>
+          <button
+            type="button"
+            disabled={!canStep2}
+            onClick={() => setStep(3)}
+            className="inline-flex min-h-12 w-full items-center justify-center rounded-[8px] bg-cobalt px-4 font-semibold text-white hover:bg-[#1d4ed8] disabled:opacity-40"
+          >
+            Correct location
+          </button>
+          <button
+            type="button"
+            onClick={() => setStep(1)}
+            className="inline-flex min-h-11 w-full items-center justify-center rounded-[8px] border border-border bg-surface px-4 font-semibold"
+          >
+            Back
+          </button>
         </section>
       ) : null}
 
       {step === 3 ? (
-        <section className="space-y-4">
-          <dl className="space-y-3 rounded-md border border-border bg-white p-4">
+        <section className="mt-5 space-y-4">
+          <div className="flex gap-3 rounded-xl border border-border bg-surface p-4 mock-card-shadow">
+            {previewUrl ? (
+              <img src={previewUrl} alt="" className="h-16 w-16 rounded-[8px] object-cover" />
+            ) : (
+              <div className="flex h-16 w-16 items-center justify-center rounded-[8px] bg-panel text-xs text-muted">
+                Media
+              </div>
+            )}
+            <div className="min-w-0">
+              <p className="text-xs text-muted">{CATEGORY_LABELS[category]}</p>
+              <p className="font-bold leading-snug">
+                {title.trim() || file?.name || "New report"}
+              </p>
+              <p className="mt-1 text-sm text-muted">{locationText.trim() || "—"}</p>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-border bg-surface p-4 mock-card-shadow">
+            <p className="mb-3 text-sm font-bold">What happens next?</p>
+            <ol className="space-y-3 text-sm">
+              <li className="flex items-center gap-3">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-cobalt text-xs font-bold text-white">
+                  ✓
+                </span>
+                Upload received
+              </li>
+              <li className="flex items-center gap-3">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-cobalt text-xs font-bold text-white">
+                  ✓
+                </span>
+                Issue identified
+              </li>
+              <li className="flex items-center gap-3 text-muted">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full border border-border-strong bg-panel text-xs font-bold">
+                  3
+                </span>
+                Moderator review pending
+              </li>
+            </ol>
+          </div>
+
+          <div className="flex gap-3 rounded-xl border border-cobalt/20 bg-cobalt/5 px-4 py-3 text-sm">
+            <span aria-hidden="true">🔔</span>
+            <p>
+              We will notify you when it is published. You can also check the status in
+              your reports anytime.
+            </p>
+          </div>
+
+          <dl className="space-y-2 rounded-xl border border-border bg-panel p-4 text-sm">
             {reviewLines.map((row) => (
-              <div key={row.label}>
-                <dt className="text-xs font-semibold uppercase tracking-wide text-muted">
-                  {row.label}
-                </dt>
-                <dd className="mt-0.5">{row.value}</dd>
+              <div key={row.label} className="flex justify-between gap-3">
+                <dt className="text-muted">{row.label}</dt>
+                <dd className="text-right font-medium">{row.value}</dd>
               </div>
             ))}
           </dl>
 
-          <p className="text-sm text-muted">
-            If approved, the report&apos;s location, selected evidence, source
-            links and display name will be public.
-          </p>
-
-          <label className="flex min-h-11 cursor-pointer items-start gap-3">
-            <input
-              type="checkbox"
-              className="mt-1 h-5 w-5"
-              checked={rightsAttested}
-              onChange={(e) => setRightsAttested(e.target.checked)}
-            />
-            <span>
-              I own this material or have the rights needed to submit it under
-              the{" "}
-              <Link to="/terms" className="text-cobalt underline-offset-2 hover:underline">
-                Terms
-              </Link>
-              .
-            </span>
-          </label>
+          {!rightsAttested ? (
+            <label className="flex min-h-11 cursor-pointer items-start gap-3 rounded-xl border border-border bg-panel p-3 text-sm">
+              <input
+                type="checkbox"
+                className="mt-1 h-5 w-5 accent-cobalt"
+                checked={rightsAttested}
+                onChange={(e) => setRightsAttested(e.target.checked)}
+              />
+              <span>
+                I own this material or have the rights needed to submit it under the{" "}
+                <Link to="/terms" className="text-cobalt underline-offset-2 hover:underline">
+                  Terms
+                </Link>
+                .
+              </span>
+            </label>
+          ) : null}
 
           {uploadProgress != null ? (
             <div>
               <p className="mb-1 text-sm font-medium">
                 Upload progress: {Math.round(uploadProgress * 100)}%
               </p>
-              <div className="h-2 overflow-hidden rounded bg-border">
+              <div className="h-2 overflow-hidden rounded-full bg-border">
                 <div
                   className="h-full bg-cobalt transition-[width]"
                   style={{ width: `${Math.round(uploadProgress * 100)}%` }}
@@ -519,26 +591,60 @@ export function SubmitPage() {
             </div>
           ) : null}
 
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => setStep(2)}
-              disabled={submitting}
-              className="inline-flex min-h-11 items-center rounded-md border border-border px-4 font-medium"
-            >
-              Back
-            </button>
-            <button
-              type="button"
-              disabled={!canStep3}
-              onClick={() => void submit()}
-              className="inline-flex min-h-11 items-center rounded-md bg-cobalt px-4 font-semibold text-white disabled:opacity-40"
-            >
-              {submitting ? "Submitting…" : "Submit for review"}
-            </button>
-          </div>
+          <button
+            type="button"
+            disabled={!canStep3}
+            onClick={() => void submit()}
+            className="inline-flex min-h-12 w-full items-center justify-center rounded-[8px] bg-cobalt px-4 font-semibold text-white hover:bg-[#1d4ed8] disabled:opacity-40"
+          >
+            {submitting ? "Submitting…" : "Submit for review"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setStep(2)}
+            disabled={submitting}
+            className="inline-flex min-h-11 w-full items-center justify-center text-sm font-semibold text-cobalt"
+          >
+            Back
+          </button>
         </section>
       ) : null}
     </Page>
+  );
+}
+
+function Stepper({ step }: { step: Step }) {
+  return (
+    <ol className="flex items-center justify-between gap-2" aria-label="Submission steps">
+      {STEP_META.map((item, idx) => {
+        const done = step > item.n;
+        const active = step === item.n;
+        return (
+          <li key={item.n} className="flex min-w-0 flex-1 items-center gap-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <span
+                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                  done || active
+                    ? "bg-cobalt text-white"
+                    : "bg-border text-muted"
+                }`}
+              >
+                {done ? "✓" : item.n}
+              </span>
+              <span
+                className={`truncate text-sm font-semibold ${
+                  active || done ? "text-ink" : "text-muted"
+                }`}
+              >
+                {item.label}
+              </span>
+            </div>
+            {idx < STEP_META.length - 1 ? (
+              <span className="hidden h-px min-w-4 flex-1 bg-border sm:block" aria-hidden="true" />
+            ) : null}
+          </li>
+        );
+      })}
+    </ol>
   );
 }
